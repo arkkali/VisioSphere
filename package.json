@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "framer-motion": "^12.35.1",
+    "uvicorn": "^0.0.1-security",
+    "xlsx": "^0.18.5"
+  }
+}

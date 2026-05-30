@@ -1,0 +1,31 @@
+const router = require('express').Router();
+const ctrl = require('../controllers/nurseController');
+const { spreadsheetUpload } = require('../config/multer');
+const { verifyToken } = require('../middleware/auth');
+const { authLimiter, uploadLimiter, writeLimiter, readLimiter } = require('../config/rateLimiter');
+
+router.post('/auth/login',          authLimiter,                                              ctrl.login);
+router.post('/auth/request-otp',    authLimiter,                                              ctrl.requestOtp);
+router.post('/auth/verify-otp',     authLimiter,                                              ctrl.verifyOtp);
+router.post('/auth/verify-2fa',     authLimiter,                                              ctrl.verify2FA);
+router.post('/auth/reset-password', authLimiter,                                              ctrl.resetPassword);
+router.get('/emergency-reset',                                        verifyToken, readLimiter,   ctrl.emergencyReset);
+router.get('/all',                                                    verifyToken, readLimiter,   ctrl.getAll);
+router.get('/filter/house/:house',                                    verifyToken, readLimiter,   ctrl.getByHouse);
+router.get('/stats',                                                  verifyToken, readLimiter,   ctrl.getStats);
+router.get('/stats/comparison',                                       verifyToken, readLimiter,   ctrl.getStatsComparison);
+router.get('/linked-profile/:adminId',                                verifyToken, readLimiter,   ctrl.getLinkedProfile);
+router.get('/:nurseId',                                               verifyToken, readLimiter,   ctrl.getOne);
+router.post('/add',                                                   verifyToken, writeLimiter,  ctrl.create);
+router.post('/upload-profile-pic',                                    verifyToken, uploadLimiter, ctrl.uploadProfilePic);
+router.post('/import', verifyToken, uploadLimiter, writeLimiter,      spreadsheetUpload.single('file'), ctrl.importFile);
+router.post('/batch',                                                 verifyToken, writeLimiter,  ctrl.batchCreate);
+router.post('/:nurseId/toggle-2fa',                                   verifyToken, writeLimiter,  ctrl.toggle2FA);
+router.put('/:nurseId/profile',                                       verifyToken, writeLimiter,  ctrl.updateProfile);
+router.put('/:nurseId/change-password',                               verifyToken, writeLimiter,  ctrl.changePassword);
+router.put('/:nurseId/assign-elder',                                  verifyToken, writeLimiter,  ctrl.assignElder);
+router.put('/:nurseId/unassign-elder',                                verifyToken, writeLimiter,  ctrl.unassignElder);
+router.put('/:nurseId',                                               verifyToken, writeLimiter,  ctrl.update);
+router.delete('/:nurseId',                                            verifyToken, writeLimiter,  ctrl.remove);
+
+module.exports = router;

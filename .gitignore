@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Root .gitignore — applies across backend/, frontend/, and ai_core/.
+# Subdirectories may have their own .gitignore for extra rules; those layer on.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Node dependencies — never commit. Hosting platforms reinstall from
+# package.json + package-lock.json. Tracking node_modules adds ~150 MB
+# of binary cruft, makes diffs unreadable, and slows clones.
+node_modules/
+
+# Environment files — these contain secrets (Mongo password, JWT secret,
+# Resend API key, AI service token, etc.). Anyone who clones the repo
+# should copy .env.example to .env and fill in their own values.
+.env
+.env.local
+.env.*.local
+
+# Python — virtual envs and bytecode caches.
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Vite / Webpack build outputs.
+dist/
+dist-ssr/
+build/
+*.local
+
+# OS / editor metadata.
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# User-uploaded files and AI-generated alert clips. Local dev artifacts —
+# the production deployment will write these to object storage instead.
+backend/uploads/
+ai_core/clips/
+
+# Logs.
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# AI model weights — too big and platform-specific to track. Ultralytics
+# auto-downloads YOLOv11-pose on first run; everything else should be
+# fetched at setup time, not committed.
+*.pt
+*.task
+
+# Saved analytics PDFs / generated artifacts.
+*.pdf

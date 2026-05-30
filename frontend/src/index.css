@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Alert-sound indicator — radiating "sonar" rings.
+   Three concentric rings animate outward from the speaker icon while an
+   alert sound is playing, giving a clear visual that audio is radiating.
+   Used in AdminDashboard.jsx; toggle by mounting/unmounting the rings
+   (driven by useAlertSound's `isPlaying` state).
+   ───────────────────────────────────────────────────────────────────────── */
+@keyframes alertSoundRipple {
+  0% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.alert-sound-ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid rgba(16, 185, 129, 0.7); /* matches active bg #10b981 */
+  animation: alertSoundRipple 1.6s ease-out infinite;
+  pointer-events: none;
+}
+
+.alert-sound-ripple-delay-1 {
+  animation-delay: 0.4s;
+}
+
+.alert-sound-ripple-delay-2 {
+  animation-delay: 0.8s;
+}
