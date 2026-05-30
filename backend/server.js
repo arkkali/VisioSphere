@@ -15,6 +15,7 @@ const { globalLimiter } = require('./config/rateLimiter');
 require('./config/firebase');
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = initSocket(server);
 app.set('io', io);
