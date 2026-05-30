@@ -1,4 +1,11 @@
 {
+  "scripts": {
+    "start": "cd backend && node server.js",
+    "heroku-postbuild": "cd backend && npm install --production"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "framer-motion": "^12.35.1",
     "uvicorn": "^0.0.1-security",
