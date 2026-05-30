@@ -22,7 +22,7 @@ export const AlertProvider = ({ children }) => {
   useEffect(() => {
     if (socketRef.current) return;
     const socket = io(SOCKET_URL, {
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,

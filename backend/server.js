@@ -24,7 +24,8 @@ app.use(helmet());
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || origin === process.env.ALLOWED_ORIGIN) {
+    const allowed = (process.env.ALLOWED_ORIGIN || '').replace(/\/$/, '');
+    if (!origin || origin === allowed) {
       callback(null, true);
     } else {
       callback(new Error(`CORS blocked: ${origin}`));
