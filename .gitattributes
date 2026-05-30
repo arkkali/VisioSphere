@@ -1,0 +1,21 @@
+# Normalize all text files to LF inside the repo. This stops the "every file
+# looks modified" CRLF/LF churn caused by mixed line endings on Windows.
+* text=auto eol=lf
+
+# Windows batch/PowerShell scripts must keep CRLF or they can misbehave.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary files — never touch line endings.
+*.pt    binary
+*.task  binary
+*.onnx  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.xlsx  binary
+*.zip   binary
