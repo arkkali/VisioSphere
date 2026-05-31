@@ -62,8 +62,15 @@ const { alerts: contextAlerts,
 
   const alerts = useMemo(() => contextAlerts.map(hydrateIncident), [contextAlerts]);
 
-  const prevLengthRef = useRef(0);
+  const prevLengthRef = useRef(null);
   useEffect(() => {
+    // On (re)mount, baseline to the current alert count so alerts that already
+    // existed before this page mounted are NOT replayed as toasts. Without this,
+    // leaving and returning to the CCTV tab re-fires the most recent alert.
+    if (prevLengthRef.current === null) {
+      prevLengthRef.current = contextAlerts.length;
+      return;
+    }
     if (contextAlerts.length <= prevLengthRef.current) {
       prevLengthRef.current = contextAlerts.length;
       return;
