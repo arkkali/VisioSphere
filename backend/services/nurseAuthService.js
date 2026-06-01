@@ -174,7 +174,7 @@ exports.requestOtp = async (email) => {
   });
 
   const { error } = await resend.emails.send({
-    from: 'onboarding@resend.dev',
+    from: process.env.MAIL_FROM || 'onboarding@resend.dev',
     to: email,
     subject: 'VisioSphere Security - Your OTP Code',
     html: `<div style="font-family:sans-serif;text-align:center;padding:20px;">
@@ -185,7 +185,10 @@ exports.requestOtp = async (email) => {
            </div>`
   });
 
-  if (error) throwError('Failed to send OTP email', 500);
+  if (error) {
+    console.error('[Resend] Nurse OTP send failed:', error);
+    throwError('Failed to send OTP email', 500);
+  }
 };
 
 exports.verifyOtp = async (email, otpCode) => {
