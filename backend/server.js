@@ -81,6 +81,7 @@ app.use('/api/settings',      require('./routes/settingsRoutes'));
 app.use('/api/incidents',     require('./routes/incidentRoutes'));
 app.use('/api/reports',       require('./routes/reportRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/stream',        require('./routes/streamRoutes'));
 
 app.use((req, res) => {
   res.status(404).json({
