@@ -1,4 +1,8 @@
 const STREAM_BASE_URL = import.meta.env.VITE_STREAM_URL || 'http://localhost:5001/video_feed';
+// Shared secret matching STREAM_TOKEN in ai_core/.env. Appended as ?key= so the
+// public Cloudflare Tunnel feed isn't open to anonymous viewers. Empty = no token.
+const STREAM_TOKEN = import.meta.env.VITE_STREAM_TOKEN || '';
+const feed = (cam) => `${STREAM_BASE_URL}/${cam}${STREAM_TOKEN ? `?key=${STREAM_TOKEN}` : ''}`;
 
 export const CAMERAS = [
   {
@@ -8,7 +12,7 @@ export const CAMERAS = [
     status: 'Active',
     fps: 30,
     type: 'stream',
-    url: `${STREAM_BASE_URL}/House%20of%20Charbel`,
+    url: feed('House%20of%20Charbel'),
   },
   {
     cameraId: 'CAM-002',
@@ -17,7 +21,7 @@ export const CAMERAS = [
     status: 'Active',
     fps: 30,
     type: 'stream',
-    url: `${STREAM_BASE_URL}/House%20of%20Gabriel`,
+    url: feed('House%20of%20Gabriel'),
   },
   {
     cameraId: 'CAM-003',
