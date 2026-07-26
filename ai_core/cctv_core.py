@@ -32,9 +32,18 @@ import sys
 import socketio
 import threading
 from collections import deque
+from pathlib import Path
+from urllib.parse import quote
 from flask import Flask, Response
 from flask_cors import CORS
 from ultralytics import YOLO
+
+try:
+    import boto3
+    import botocore.exceptions as botocore_exceptions
+except ImportError:
+    boto3 = None
+    botocore_exceptions = None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Camera Configuration
@@ -61,16 +70,120 @@ def _coerce_source(value):
     except (TypeError, ValueError):
         return value
 
-CAMERAS = [
-    (
-        os.getenv("CAM_0_ID", "House of Charbel"),
-        _coerce_source(os.getenv("CAM_0_SOURCE", "0")),
-    ),
-    (
-        os.getenv("CAM_1_ID", "House of Gabriel"),
-        _coerce_source(os.getenv("CAM_1_SOURCE", "rtsp://192.168.100.109/stream1")),
-    ),
-]
+def _make_camera(id_key, id_default, src_key, src_default):
+    """Return (cam_id, source) or None if either value is empty/unset."""
+    cam_id = os.getenv(id_key, id_default).strip()
+    source = _coerce_source(os.getenv(src_key, src_default).strip() if isinstance(os.getenv(src_key, src_default), str) else os.getenv(src_key, src_default))
+    if not cam_id or source == "":
+        return None
+    return (cam_id, source)
+
+CAMERAS = [c for c in [
+    _make_camera("CAM_0_ID", "House of Charbel", "CAM_0_SOURCE", "0"),
+    _make_camera("CAM_1_ID", "House of Gabriel", "CAM_1_SOURCE", "rtsp://192.168.100.109/stream1"),
+] if c is not None]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IP Camera Auto-Discovery
+# Scans the ARP table for TP-Link / Tapo MAC OUIs and probes RTSP on each
+# candidate.  Called by capture_thread when the configured IP stops responding.
+# ─────────────────────────────────────────────────────────────────────────────
+import re as _re
+import subprocess as _subprocess
+from urllib.parse import urlparse as _urlparse
+
+# Known TP-Link / Tapo MAC OUI prefixes (first 3 octets, colon-separated, lowercase)
+_TPLINK_OUIS = {
+    '50:c7:bf', 'b0:95:75', 'c0:06:c3', 'b4:b0:24', '14:eb:b6',
+    'b0:4e:26', '98:48:27', '54:af:97', '50:91:e3', '1c:61:b4',
+    'f4:f2:6d', 'e8:48:b8', '30:de:4b', 'a4:2b:b0', 'ec:08:6b',
+    '60:32:b1', 'ac:84:c9', '00:1d:0f', 'c4:e9:84', '18:d6:c7',
+    '74:da:38', '70:4f:57', '3c:84:6a', 'f8:1a:67', '44:61:32',
+    'ac:a7:f1',  # Tapo TC65 (House of Gabriel)
+}
+
+def _get_arp_candidates():
+    """Return IPs from the ARP table whose MAC prefix matches a TP-Link OUI."""
+    try:
+        out = _subprocess.check_output(['arp', '-a'], text=True, timeout=5)
+    except Exception:
+        return []
+    candidates = []
+    for line in out.splitlines():
+        ip_m  = _re.search(r'(\d{1,3}(?:\.\d{1,3}){3})', line)
+        mac_m = _re.search(
+            r'([0-9a-f]{2}[:\-][0-9a-f]{2}[:\-][0-9a-f]{2})[:\-]'
+            r'[0-9a-f]{2}[:\-][0-9a-f]{2}[:\-][0-9a-f]{2}',
+            line.lower()
+        )
+        if ip_m and mac_m:
+            oui = mac_m.group(1).replace('-', ':')
+            if oui in _TPLINK_OUIS:
+                candidates.append(ip_m.group(1))
+    return candidates
+
+def _test_rtsp(url, timeout_ms=5000):
+    """Return True if OpenCV can grab at least one frame from the RTSP URL."""
+    cap = cv2.VideoCapture(url)
+    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC,  timeout_ms)
+    ok, _ = cap.read()
+    cap.release()
+    return ok
+
+def discover_rtsp_source(original_url):
+    """
+    When the configured RTSP IP is unreachable (e.g. after a network change),
+    scan the ARP table for TP-Link/Tapo devices and probe each one with the
+    same credentials / port / path extracted from original_url.
+    Returns a working RTSP URL, or None if discovery fails.
+    """
+    if not isinstance(original_url, str) or not original_url.startswith('rtsp://'):
+        return None
+
+    parsed    = _urlparse(original_url)
+    cred_part = f"{parsed.username}:{parsed.password}@" if parsed.username else ''
+    port      = parsed.port or 554
+    path      = parsed.path or '/stream1'
+
+    print("[DISCOVERY] Scanning ARP table for TP-Link/Tapo devices …")
+    candidates = _get_arp_candidates()
+
+    if not candidates:
+        print("[DISCOVERY] No TP-Link MAC addresses in ARP table — "
+              "is the camera on the same network as this machine?")
+        return None
+
+    for ip in candidates:
+        url = f"rtsp://{cred_part}{ip}:{port}{path}"
+        print(f"[DISCOVERY] Trying {url} …")
+        if _test_rtsp(url):
+            print(f"[DISCOVERY] ✓ Camera found at {ip}")
+            # Persist the new IP back to .env so the next restart is instant
+            try:
+                env_path = os.path.join(os.path.dirname(__file__), '.env')
+                if os.path.exists(env_path):
+                    with open(env_path, 'r') as f:
+                        env_text = f.read()
+                    import re as _re2
+                    new_text = _re2.sub(
+                        r'(CAM_\d+_SOURCE\s*=\s*rtsp://[^\s]*@)[\d.]+(:)',
+                        lambda m: m.group(0).rsplit('@', 1)[0] + '@' + ip + m.group(2),
+                        env_text
+                    )
+                    # Only write if the URL actually changed
+                    old_ip = _urlparse(original_url).hostname
+                    if old_ip and old_ip != ip:
+                        new_text = env_text.replace(old_ip, ip)
+                        with open(env_path, 'w') as f:
+                            f.write(new_text)
+                        print(f"[DISCOVERY] Updated .env: {old_ip} → {ip}")
+            except Exception as e:
+                print(f"[DISCOVERY] Could not update .env: {e}")
+            return url
+
+    print("[DISCOVERY] Candidates found but none responded to RTSP.")
+    return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Socket.IO & Backend Config
@@ -159,7 +272,6 @@ raw_lock = threading.Lock()
 # hold ~92 MB per camera in the rolling buffer. Two cameras ≈ 184 MB. If you
 # add more cameras or increase resolution, watch this number.
 import math
-from pathlib import Path
 from datetime import datetime
 
 # Inference frame size. Capture frames are downscaled to this before pose
@@ -182,6 +294,27 @@ if not CLIP_DIR.is_absolute():
     CLIP_DIR = (Path(__file__).parent / CLIP_DIR).resolve()
 CLIP_DIR.mkdir(parents=True, exist_ok=True)
 print(f"[INIT] Alert clips will be saved to {CLIP_DIR}")
+
+CLIP_S3_BUCKET = os.getenv("CLIP_S3_BUCKET", "").strip()
+CLIP_S3_PREFIX = os.getenv("CLIP_S3_PREFIX", "clips/").strip()
+if CLIP_S3_PREFIX and not CLIP_S3_PREFIX.endswith("/"):
+    CLIP_S3_PREFIX += "/"
+
+
+def get_s3_client():
+    if not CLIP_S3_BUCKET:
+        raise RuntimeError("CLIP_S3_BUCKET is not configured")
+    if boto3 is None:
+        raise RuntimeError("boto3 is not installed. Install with: pip install boto3")
+    return boto3.session.Session().client('s3')
+
+
+def get_s3_clip_url(bucket, key):
+    region = os.getenv("AWS_REGION", "").strip()
+    escaped_key = quote(key, safe="/")
+    if not region:
+        return f"s3://{bucket}/{escaped_key}"
+    return f"https://{bucket}.s3.{region}.amazonaws.com/{escaped_key}"
 
 # Rolling pre-roll buffer per camera. maxlen is generously sized to absorb
 # inference-rate variance — we throttle appends to CLIP_FPS in the inference
@@ -258,10 +391,21 @@ def _record_alert_clip(cam_id, clip_path, alert_payload):
         writer.write(frame)
     writer.release()
 
+    s3_path = None
+    if CLIP_S3_BUCKET:
+        s3_key = f"{CLIP_S3_PREFIX}{clip_path.name}" if CLIP_S3_PREFIX else clip_path.name
+        try:
+            client = get_s3_client()
+            client.upload_file(str(clip_path), CLIP_S3_BUCKET, s3_key)
+            s3_path = get_s3_clip_url(CLIP_S3_BUCKET, s3_key)
+            print(f"[CLIP] {cam_id}: uploaded clip to {s3_path}")
+        except Exception as err:
+            print(f"[CLIP] {cam_id}: failed to upload clip to S3: {err}")
+
     # 4) Tell the backend the clip is ready so it can update the Incident.
-    rel_path = f"clips/{clip_path.name}"
-    print(f"[CLIP] {cam_id}: saved {rel_path} ({len(all_frames)} frames, "
-          f"{len(pre_roll)} pre / {len(post_roll)} post)")
+    rel_path = s3_path or f"clips/{clip_path.name}"
+    print(f"[CLIP] {cam_id}: saved {clip_path.name} ({len(all_frames)} frames, "
+          f"{len(pre_roll)} pre / {len(post_roll)} post) -> {rel_path}")
     if sio.connected:
         sio.emit("cctv_alert_clip", {
             "location":  cam_id,
@@ -557,6 +701,44 @@ def get_body_aspect_ratio(box):
     w = max(x2 - x1, 1)
     h = max(y2 - y1, 1)
     return h / w
+
+# ── Keypoint temporal smoothing ───────────────────────────────────────────────
+# Per-track EMA smoothing eliminates the flicker caused by confidence
+# oscillating around POSE_CONF_THRESHOLD.  alpha=0.40 → each new frame
+# contributes 40%; the previous smoothed value contributes 60%.
+#
+# Position (x, y) is only pulled toward the new estimate when the keypoint
+# is actually visible (raw conf ≥ 0.15); otherwise the position freezes in
+# place.  Confidence is always blended so it transitions smoothly through the
+# threshold rather than snapping on/off — this is what kills the flicker.
+KPT_SMOOTH_ALPHA = 0.40
+KPT_VISIBLE_MIN  = 0.15   # raw-conf floor to update x,y (occlusion guard)
+
+def smooth_keypoints(kpt_smooth: dict, tid: int, raw_kpts) -> np.ndarray:
+    """Return EMA-smoothed keypoints for track `tid`, updating kpt_smooth in place.
+
+    kpt_smooth : dict  track_id → np.ndarray (17, 3)
+    raw_kpts   : np.ndarray (17, 3) from YOLO this frame
+    """
+    alpha = KPT_SMOOTH_ALPHA
+    if tid not in kpt_smooth:
+        kpt_smooth[tid] = raw_kpts.copy()
+        return raw_kpts.copy()
+
+    prev    = kpt_smooth[tid]
+    blended = prev.copy()
+    for j in range(len(raw_kpts)):
+        new_conf = float(raw_kpts[j, 2])
+        if new_conf >= KPT_VISIBLE_MIN:
+            blended[j, 0] = alpha * raw_kpts[j, 0] + (1.0 - alpha) * prev[j, 0]
+            blended[j, 1] = alpha * raw_kpts[j, 1] + (1.0 - alpha) * prev[j, 1]
+        # confidence always blends — gives hysteresis so a keypoint near the
+        # threshold fades in/out over several frames instead of blinking.
+        blended[j, 2] = alpha * new_conf + (1.0 - alpha) * float(prev[j, 2])
+
+    kpt_smooth[tid] = blended
+    return blended
+
 
 def draw_pose_overlay(frame, kpts):
     skeleton = [
@@ -1292,13 +1474,48 @@ def send_alert(cam_id, alert_type, message, detection=None):
 def capture_thread(cam_id, source):
     cap = cv2.VideoCapture(source)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    # For video file sources, throttle reads to the file's native FPS so that
+    # time-based state machines (lying-down confirmation timer, inactivity
+    # threshold, fall rate window) behave as they would on a live stream.
+    # Live streams (integer device index or RTSP URL) are not throttled.
+    _is_file_source = isinstance(source, str) and not source.startswith("rtsp://")
+    _file_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    _frame_dt = 1.0 / _file_fps if _is_file_source else 0.0
+    _fail_count = 0
+    _DISCOVERY_AFTER = 5  # trigger auto-discovery after this many consecutive failures
     while True:
         ret, frame = cap.read()
         if not ret:
+            # For video file sources, loop back to the start instead of
+            # treating end-of-file as a camera failure. This keeps the
+            # browser feed alive during testing and lets time-based detectors
+            # (inactivity, pacing) accumulate state across the full clip.
+            if _is_file_source:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                print(f"[CAPTURE {cam_id}] Video file ended — looping.")
+                continue
+            _fail_count += 1
             time.sleep(1)
+            # After repeated failures on an RTSP source, try to find the camera
+            # at its new IP (e.g. after a network change).
+            if (_fail_count >= _DISCOVERY_AFTER
+                    and isinstance(source, str)
+                    and source.startswith('rtsp://')):
+                print(f"[CAPTURE {cam_id}] {_fail_count} consecutive failures — "
+                      "running auto-discovery …")
+                discovered = discover_rtsp_source(source)
+                if discovered and discovered != source:
+                    print(f"[CAPTURE {cam_id}] Switching source → {discovered}")
+                    source = discovered
+                    _fail_count = 0
             cap = cv2.VideoCapture(source)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            _file_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            _frame_dt = 1.0 / _file_fps if _is_file_source else 0.0
             continue
+        _fail_count = 0  # reset on successful read
+        if _frame_dt:
+            time.sleep(_frame_dt)
         # Stamp the frame at capture time. Inference may queue behind this,
         # but timing logic (fall rate, inactivity windows) needs the
         # moment the frame was *seen*, not the moment we got around to it.
@@ -1384,6 +1601,7 @@ def process_camera_thread(cam_id):
     last_behavior_per = {}   # track_id → last body-agitation alert string (debounce)
     last_pacing_per   = {}   # track_id → last pacing alert string (debounce)
     last_movement_per = {}   # track_id → last movement alert string (debounce)
+    kpt_smooth        = {}   # track_id → np.ndarray (17,3) EMA-smoothed keypoints
 
     def state_for(d, track_id, factory):
         if track_id not in d:
@@ -1425,7 +1643,11 @@ def process_camera_thread(cam_id):
                 continue
             ids = r.boxes.id.cpu().numpy().astype(int)
             for i, box in enumerate(r.boxes):
-                kpts = r.keypoints.data[i].cpu().numpy()
+                raw_kpts = r.keypoints.data[i].cpu().numpy()
+                # Apply EMA smoothing before any drawing or detection logic.
+                # smooth_keypoints() updates kpt_smooth[tid] in place and returns
+                # the blended (17,3) array; raw_kpts is never modified.
+                kpts = smooth_keypoints(kpt_smooth, int(ids[i]), raw_kpts)
                 observations.append({
                     "tid":  int(ids[i]),
                     "kpts": kpts,
@@ -1649,6 +1871,7 @@ def process_camera_thread(cam_id):
             last_behavior_per.pop(tid, None)
             last_pacing_per.pop(tid, None)
             last_movement_per.pop(tid, None)
+            kpt_smooth.pop(tid, None)
 
         # ── On-frame HUD ──────────────────────────────────────────────────
         # HUD bar spans the full frame width and a fixed pixel height so it
@@ -1666,6 +1889,8 @@ def process_camera_thread(cam_id):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
         with lock:
+            if cam_frames[cam_id] is None:
+                print(f"[STREAM {cam_id}] ✅ First frame ready — browser feed is now live.")
             cam_frames[cam_id] = display.copy()
 
         # Throttled push into the pre-roll buffer for alert clip recording.
@@ -1677,14 +1902,42 @@ def process_camera_thread(cam_id):
 # ─────────────────────────────────────────────────────────────────────────────
 # Flask — MJPEG Stream Routes
 # ─────────────────────────────────────────────────────────────────────────────
+def _make_offline_frame(cam_id):
+    """Black JPEG with 'Camera Offline' text — yielded while the camera is
+    unavailable so Cloudflare never times out with a 524."""
+    img = np.zeros((INFERENCE_H, INFERENCE_W, 3), dtype=np.uint8)
+    cv2.putText(img, "CAMERA OFFLINE", (INFERENCE_W // 2 - 160, INFERENCE_H // 2 - 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 80, 80), 2)
+    cv2.putText(img, cam_id, (INFERENCE_W // 2 - 100, INFERENCE_H // 2 + 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 60, 60), 1)
+    cv2.putText(img, "Waiting for inference thread...", (INFERENCE_W // 2 - 190, INFERENCE_H // 2 + 55),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50, 50, 50), 1)
+    _, buf = cv2.imencode(".jpg", img)
+    return buf.tobytes()
+
+
 def generate_frames(cam_id):
+    _offline_frame   = _make_offline_frame(cam_id)
+    _offline_sent_at = 0.0
     while True:
         with lock:
             raw = cam_frames.get(cam_id)
             frame = raw.copy() if raw is not None else None
 
         if frame is None:
-            time.sleep(0.01)
+            # Yield a placeholder at ~1 fps so the MJPEG stream stays alive
+            # and Cloudflare doesn't 524. Switches to live frames the moment
+            # the capture thread delivers one.
+            now = time.time()
+            if now - _offline_sent_at >= 1.0:
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n"
+                    + _offline_frame
+                    + b"\r\n"
+                )
+                _offline_sent_at = now
+            time.sleep(0.1)
             continue
 
         _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
@@ -1697,8 +1950,56 @@ def generate_frames(cam_id):
         time.sleep(0.033)   # ~30 FPS cap
 
 
+def _verify_signed_stream_token(token: str) -> bool:
+    """Verify a backend-minted short-lived stream token.
+
+    Token format:  v1.<expUnixSeconds>.<hmacSha256Hex("v1.<exp>", secret)>
+    Mirrors backend/utils/streamToken.js. Shared secret = STREAM_SIGNING_SECRET.
+    Returns True only when the signature matches AND the token has not expired.
+    """
+    import hmac, hashlib, time as _time
+    secret = os.getenv("STREAM_SIGNING_SECRET", "")
+    if not secret or not token:
+        return False
+    parts = token.split(".")
+    if len(parts) != 3:
+        return False
+    version, exp, sig = parts
+    message = f"{version}.{exp}"
+    expected = hmac.new(
+        secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return False
+    try:
+        if int(exp) < int(_time.time()):
+            return False
+    except ValueError:
+        return False
+    return True
+
+
 @app.route("/video_feed/<cam_id>")
 def video_feed(cam_id):
+    # Two-tier auth, both optional and independent:
+    #   1. ?token=<signed>  — short-lived HMAC token minted by the authenticated
+    #      backend (STREAM_SIGNING_SECRET). Preferred; per-session, expires.
+    #   2. ?key=<STREAM_TOKEN> — legacy static shared secret (kept for the
+    #      already-deployed web frontend until it migrates).
+    # If neither STREAM_SIGNING_SECRET nor STREAM_TOKEN is set, the feed is open
+    # (local-only/dev). Lets the public Cloudflare Tunnel be exposed safely.
+    from flask import request, abort
+    _signing_secret = os.getenv("STREAM_SIGNING_SECRET", "")
+    _stream_token = os.getenv("STREAM_TOKEN", "")
+
+    if _signing_secret or _stream_token:
+        token = request.args.get("token", "")
+        key = request.args.get("key", "")
+        signed_ok = bool(_signing_secret) and _verify_signed_stream_token(token)
+        legacy_ok = bool(_stream_token) and key == _stream_token
+        if not (signed_ok or legacy_ok):
+            abort(403)
+
     return Response(
         generate_frames(cam_id),
         mimetype="multipart/x-mixed-replace; boundary=frame"

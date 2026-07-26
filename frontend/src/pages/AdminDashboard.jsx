@@ -135,8 +135,9 @@ const AdminDashboard = () => {
 
   const notifications = contextAlerts.map(incidentToNotif);
 
-  const prevAlertCount = useRef(0);
+  const prevAlertCount = useRef(null); // null = initial seed not yet received
   useEffect(() => {
+    if (prevAlertCount.current === null) return; // wait for seed baseline
     if (contextAlerts.length > prevAlertCount.current) {
       const newest = contextAlerts[0];
       if (newest && !newest.acknowledged) {
@@ -171,8 +172,13 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     dashboardService.getRecentIncidents()
-      .then(items => seedAlerts(items))
-      .catch(() => {});
+      .then(items => {
+        prevAlertCount.current = items.length; // baseline before seeding to suppress login sound
+        seedAlerts(items);
+      })
+      .catch(() => {
+        prevAlertCount.current = 0; // unblock on error
+      });
 
     dashboardService.getUnreadCount()
       .then(count => seedUnreadCount(count))

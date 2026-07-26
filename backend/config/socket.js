@@ -41,7 +41,8 @@ const initSocket = (server) => {
     cors: {
       origin: (origin, callback) => {
         const allowed = (process.env.ALLOWED_ORIGIN || '').replace(/\/$/, '');
-        if (!origin || origin === allowed) {
+        const isLocalhost = /^https?:\/\/localhost(:\d+)?$/.test(origin || '');
+        if (!origin || origin === allowed || isLocalhost) {
           callback(null, true);
         } else {
           callback(new Error(`CORS blocked: ${origin}`));

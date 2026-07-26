@@ -29,6 +29,8 @@ build/
 .env.*
 **/.env
 **/.env.*
+!.env.example
+!**/.env.example
 *.local
 
 # ========================
