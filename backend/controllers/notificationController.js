@@ -1,5 +1,5 @@
 const notificationService = require('../services/notificationService');
-const User  = require('../models/User');
+const Admin  = require('../models/Admin');
 const Nurse = require('../models/Nurse');
 
 const getByGuardian = async (req, res, next) => {
@@ -56,7 +56,7 @@ const registerAdminFcmToken = async (req, res, next) => {
       return res.status(400).json({ message: 'fcmToken is required' });
     }
 
-    const admin = await User.findOneAndUpdate(
+    const admin = await Admin.findOneAndUpdate(
       { customId, role: 'Facility Admin' },
       { fcmToken },
       { new: true }

@@ -1,5 +1,5 @@
 const bcryptjs = require('bcryptjs');
-const User = require('../models/User');
+const Admin = require('../models/Admin');
 const Nurse = require('../models/Nurse');
 const Resident = require('../models/Resident');
 const Incident = require('../models/Incident');
@@ -36,16 +36,16 @@ const buildStatDiff = (current, previous, labels) => {
 };
 
 exports.getAll = () =>
-  User.find({ role: 'Facility Admin' }).select('-password');
+  Admin.find({ role: 'Facility Admin' }).select('-password');
 
 exports.getOne = async (customId) => {
-  const admin = await User.findOne({ customId, role: 'Facility Admin' }).select('-password');
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' }).select('-password');
   if (!admin) throwError('Admin not found', 404);
   return admin;
 };
 
 exports.getStats = async (adminId) => {
-  const admin = await User.findOne({ customId: adminId, role: 'Facility Admin' }).select('_id');
+  const admin = await Admin.findOne({ customId: adminId, role: 'Facility Admin' }).select('_id');
   if (!admin) throwError('Admin not found', 404);
 
   const { startOfThisMonth, startOfLastMonth, endOfLastMonth } = getMonthBoundaries();
@@ -91,7 +91,7 @@ exports.register = async (data) => {
     isFirstLogin = false;
   }
 
-  const newAdmin = await new User({
+  const newAdmin = await new Admin({
     name, email, password: hashedPassword, isFirstLogin, role: 'Facility Admin'
   }).save();
 
@@ -106,7 +106,7 @@ exports.register = async (data) => {
 };
 
 exports.uploadProfilePic = async (customId, imageBase64) => {
-  const admin = await User.findOne({ customId, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
   if (!admin) throwError('Admin not found', 404);
 
   admin.profilePic = imageBase64;
@@ -120,7 +120,7 @@ exports.uploadProfilePic = async (customId, imageBase64) => {
 };
 
 exports.updateProfile = async (customId, updateData) => {
-  const admin = await User.findOneAndUpdate(
+  const admin = await Admin.findOneAndUpdate(
     { customId, role: 'Facility Admin' },
     updateData,
     { returnDocument: 'after' }
@@ -138,7 +138,7 @@ exports.updateProfile = async (customId, updateData) => {
 };
 
 exports.changePassword = async (customId, oldPassword, newPassword) => {
-  const admin = await User.findOne({ customId, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
   if (!admin) throwError('Admin not found', 404);
 
   const isMatch = await bcryptjs.compare(oldPassword, admin.password);
@@ -163,7 +163,7 @@ exports.changePassword = async (customId, oldPassword, newPassword) => {
 };
 
 exports.toggle2FA = async (customId, enable, pin) => {
-  const admin = await User.findOne({ customId, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
   if (!admin) throwError('Admin not found', 404);
 
   admin.is2FAEnabled = enable;
@@ -181,7 +181,7 @@ exports.toggle2FA = async (customId, enable, pin) => {
 };
 
 exports.linkNurse = async (customId, nurseId) => {
-  const admin = await User.findOne({ customId, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
   if (!admin) throwError('Admin not found', 404);
 
   const nurse = await Nurse.findOne({ nurseId });
@@ -215,7 +215,7 @@ exports.linkNurse = async (customId, nurseId) => {
 };
 
 exports.unlinkNurse = async (customId) => {
-  const admin = await User.findOne({ customId, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
   if (!admin) throwError('Admin not found', 404);
 
   if (admin.linkedNurseId) {
@@ -234,7 +234,7 @@ exports.unlinkNurse = async (customId) => {
 };
 
 exports.deactivate = async (customId) => {
-  const admin = await User.findOne({ customId, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
   if (!admin) throwError('Admin not found', 404);
 
   admin.status = 'INACTIVE';

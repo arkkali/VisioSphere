@@ -35,4 +35,10 @@ const dailyAssessmentSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+// Hot path: getAssessmentsByResident does
+//   DailyAssessment.find({ residentId }).sort({ createdAt: -1 })
+// for the resident's journal feed (guardian app + nurse dashboard).
+// Compound index lets Mongo satisfy the filter and the sort from one index scan.
+dailyAssessmentSchema.index({ residentId: 1, createdAt: -1 });
+
 module.exports = mongoose.model('DailyAssessment', dailyAssessmentSchema);

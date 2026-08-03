@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const userSchema = new mongoose.Schema({
+const adminSchema = new mongoose.Schema({
   customId:      { type: String, unique: true },
   name:          { type: String, required: true },
   email:         { type: String, required: true, unique: true },
@@ -22,7 +22,7 @@ const userSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-userSchema.statics.generateCustomId = async function (role) {
+adminSchema.statics.generateCustomId = async function (role) {
   const currentYear = new Date().getFullYear();
   let prefix = '';
 
@@ -48,4 +48,4 @@ userSchema.statics.generateCustomId = async function (role) {
   return null;
 };
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = mongoose.model('Admin', adminSchema, 'admins');

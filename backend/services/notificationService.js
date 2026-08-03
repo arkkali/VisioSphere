@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const Notification = require('../models/Notification');
-const User  = require('../models/User');
+const Admin  = require('../models/Admin');
 const Nurse = require('../models/Nurse');
 const admin = require('../config/firebase');
 
@@ -58,7 +58,7 @@ const deleteNotification = async (id) => {
 const dispatchIncidentPushToStaff = async (incident) => {
   try {
     const [admins, nurses] = await Promise.all([
-      User.find({ role: 'Facility Admin', status: 'ACTIVE', fcmToken: { $ne: null } }, 'fcmToken').lean(),
+      Admin.find({ role: 'Facility Admin', status: 'ACTIVE', fcmToken: { $ne: null } }, 'fcmToken').lean(),
       Nurse.find({ status: 'Active', fcmToken: { $ne: null } }, 'fcmToken').lean(),
     ]);
     const tokens = [
@@ -107,7 +107,7 @@ const dispatchIncidentPushToStaff = async (incident) => {
 const dispatchResolutionPushToStaff = async (incident, resolverName) => {
   try {
     const [admins, nurses] = await Promise.all([
-      User.find({ role: 'Facility Admin', status: 'ACTIVE', fcmToken: { $ne: null } }, 'fcmToken').lean(),
+      Admin.find({ role: 'Facility Admin', status: 'ACTIVE', fcmToken: { $ne: null } }, 'fcmToken').lean(),
       Nurse.find({ status: 'Active', fcmToken: { $ne: null } }, 'fcmToken').lean(),
     ]);
     const tokens = [

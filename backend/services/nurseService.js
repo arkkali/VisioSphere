@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const Nurse = require('../models/Nurse');
-const User = require('../models/User');
+const Admin = require('../models/Admin');
 const AuditLog = require('../models/AuditLog');
 
 const throwError = (message, status) => {
@@ -52,7 +52,7 @@ exports.getOne = (nurseId) =>
   Nurse.findOne({ nurseId }).select('-password').populate('assignedElders');
 
 exports.getLinkedProfile = async (adminId) => {
-  const admin = await User.findOne({ customId: adminId });
+  const admin = await Admin.findOne({ customId: adminId });
   if (!admin) throwError('Admin not found', 404);
   if (!admin.linkedNurseId) throwError('No linked nurse profile found', 404);
   const nurse = await Nurse.findOne({ nurseId: admin.linkedNurseId }).select('-password');

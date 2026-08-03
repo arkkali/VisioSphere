@@ -1,6 +1,6 @@
   const incidentService = require('../services/incidentService');
   const { dispatchResolutionPushToStaff } = require('../services/notificationService');
-  const User = require('../models/User');
+  const Admin = require('../models/Admin');
   const Nurse = require('../models/Nurse');
 
   async function getIncidents(req, res, next) {
@@ -65,7 +65,7 @@
       let resolverName = req.user?.name || null;
       if (!resolverName) {
         if (req.user?.adminId) {
-          const u = await User.findById(req.user.adminId).select('name').lean();
+          const u = await Admin.findById(req.user.adminId).select('name').lean();
           resolverName = u?.name || 'Staff';
         } else if (req.user?.nurseId) {
           const n = await Nurse.findOne({ nurseId: req.user.nurseId }).select('firstName lastName').lean();

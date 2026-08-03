@@ -1,7 +1,7 @@
 const bcryptjs = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
-const User = require('../models/User');
+const Admin = require('../models/Admin');
 const AuditLog = require('../models/AuditLog');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -14,7 +14,7 @@ const throwError = (message, status) => {
 };
 
 exports.login = async (customId, password) => {
-  const admin = await User.findOne({
+  const admin = await Admin.findOne({
     $or: [{ customId }, { email: customId?.toLowerCase() }],
     role: 'Facility Admin'
   });
@@ -101,7 +101,7 @@ exports.login = async (customId, password) => {
 };
 
 exports.verify2FA = async (customId, pin) => {
-  const admin = await User.findOne({ customId, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
   if (!admin) throwError('Invalid credentials.', 401);
 
   if (admin.twoFaPin !== pin) {
@@ -133,7 +133,7 @@ exports.verify2FA = async (customId, pin) => {
 };
 
 exports.requestOtp = async (email) => {
-  const admin = await User.findOne({ email, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ email, role: 'Facility Admin' });
   if (!admin) throwError('No account found with that email address.', 404);
 
   const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -166,7 +166,7 @@ exports.requestOtp = async (email) => {
 };
 
 exports.verifyOtp = async (email, otpCode) => {
-  const admin = await User.findOne({ email, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ email, role: 'Facility Admin' });
   if (!admin) throwError('Admin not found', 404);
 
   if (admin.otpCode !== otpCode) {
@@ -187,7 +187,7 @@ exports.resetPassword = async (email, otpCode, newPassword, confirmPassword) => 
   if (newPassword !== confirmPassword) throwError('Passwords do not match', 400);
   if (newPassword.length < 6) throwError('Password must be at least 6 characters', 400);
 
-  const admin = await User.findOne({ email, role: 'Facility Admin' });
+  const admin = await Admin.findOne({ email, role: 'Facility Admin' });
   if (!admin) throwError('Admin not found', 404);
 
   if (admin.otpCode !== otpCode || new Date() > admin.otpExpiry)
