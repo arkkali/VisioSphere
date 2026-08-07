@@ -7,6 +7,13 @@ exports.getAll = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Act 4: GET /api/residents — paginated, resource-style replacement for GET /api/residents/all
+exports.getPaginated = async (req, res, next) => {
+  try {
+    res.status(200).json(await residentService.getPaginated(req.query));
+  } catch (err) { next(err); }
+};
+
 exports.getByNurse = async (req, res, next) => {
   try {
     res.status(200).json(await residentService.getByNurse(req.params.nurseId));

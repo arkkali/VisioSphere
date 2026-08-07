@@ -4,6 +4,9 @@ const { spreadsheetUpload } = require('../config/multer');
 const { verifyToken } = require('../middleware/auth');
 const { uploadLimiter, writeLimiter, readLimiter } = require('../config/rateLimiter');
 
+// Act 4: new resource-style, paginated list. GET /all kept below, unpaginated,
+// because the current frontend's Elders page still calls it directly (safety note: don't break the client).
+router.get('/',                                                       verifyToken, readLimiter,                ctrl.getPaginated);
 router.get('/all',                                                    verifyToken, readLimiter,                ctrl.getAll);
 router.get('/stats',                                                  verifyToken, readLimiter,                ctrl.getStats);
 router.get('/stats/comparison',                                       verifyToken, readLimiter,                ctrl.getStatsComparison);

@@ -25,6 +25,27 @@ const buildComparison = (current, previous, period) => {
 exports.getAll = () =>
   Resident.find().sort({ createdAt: -1 });
 
+// Act 4: paginated version backing GET /api/residents.
+// Same filter/sort as the old /all (none applied, sorted by createdAt desc) — only difference is skip/limit.
+exports.getPaginated = async ({ page = 1, limit = 20 } = {}) => {
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+  const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+  const skip = (pageNum - 1) * limitNum;
+
+  const [data, total] = await Promise.all([
+    Resident.find().sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+    Resident.countDocuments(),
+  ]);
+
+  return {
+    data,
+    page: pageNum,
+    limit: limitNum,
+    total,
+    totalPages: Math.ceil(total / limitNum),
+  };
+};
+
 exports.getByNurse = async (nurseId) => {
   const nurse = await Nurse.findOne({ nurseId }).populate({
     path: 'assignedElders',
