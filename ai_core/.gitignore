@@ -1,4 +1,3 @@
-
 .env
 .env.*
 
@@ -10,3 +9,22 @@ venv/
 
 **/test_videos/
 **/clips/
+
+# Weights & Models
+*.pt
+*.onnx
+*.engine
+
+# Dynamic Logs & Output Files
+*.log
+alert_log.json
+
+# Audio Files
+*.mp3
+*.wav
+
+# System & IDE
+.vscode/
+node_modules/
+
+**/ground_truth/
