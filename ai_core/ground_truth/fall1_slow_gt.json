@@ -1,0 +1,27 @@
+{
+  "clip": "falls/fall1_slow.mp4",
+  "duration_seconds": 36.2,
+  "_verified_by_human": false,
+  "_note": "Machine-proposed from replay signals, NOT verified by watching the clip. Correct start/end by eye before trusting any metric.",
+  "events": [
+    {
+      "type": "fall",
+      "start_seconds": 26.2,
+      "end_seconds": 27.0,
+      "notes": "PROPOSED: torso angle 17->110 deg in 0.4s, centre-y 180->232, hip x~0.47 (left of the sofa). Confirm by eye."
+    },
+    {
+      "type": "lying_down",
+      "start_seconds": 27.0,
+      "end_seconds": 36.2,
+      "notes": "PROPOSED: remains down to end of clip. Confirm by eye."
+    }
+  ],
+  "_non_events": [
+    {
+      "window": "17.4 - 24.7",
+      "what": "sits down on the sofa and gets back up",
+      "why": "This is the false positive under test. There must be NO fall or lying_down event here \u2014 any alert in this window is an FP."
+    }
+  ]
+}

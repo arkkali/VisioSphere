@@ -1,0 +1,27 @@
+{
+  "clip": "falls/fall4_slow.mp4",
+  "duration_seconds": null,
+  "_verified_by_human": false,
+  "_note": "STUB \u2014 fill in start/end seconds by watching the clip.",
+  "events": [
+    {
+      "type": "fall",
+      "start_seconds": 0,
+      "end_seconds": 0,
+      "notes": "FILL IN"
+    },
+    {
+      "type": "lying_down",
+      "start_seconds": 0,
+      "end_seconds": 0,
+      "notes": "FILL IN"
+    }
+  ],
+  "_non_events": [
+    {
+      "window": "0 - 0",
+      "what": "sitting / bending / other benign posture",
+      "why": "List windows where an alert would be a false positive."
+    }
+  ]
+}

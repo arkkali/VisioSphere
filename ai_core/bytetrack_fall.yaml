@@ -1,0 +1,41 @@
+# ByteTrack tuned to keep hold of people lying on the floor.
+# Copy of the Ultralytics 8.4.37 stock config with four values changed.
+#
+# Kept in ai_core/ rather than edited in site-packages, so pip upgrades cannot
+# silently overwrite it and other Ultralytics users are unaffected.
+#
+# THE PROBLEM THIS SOLVES
+#   cctv_core passes conf=DET_CONF (0.10), so weak detections now reach the
+#   tracker. But stock new_track_thresh is 0.25, and that governs whether
+#   ByteTrack will CREATE a track. A body on the floor scoring 0.15 could
+#   sustain an existing track but never start one — and cctv_core discards any
+#   detection without a track ID. The box therefore flickers, then disappears
+#   for good once track_buffer expires.
+#
+# TRADE-OFF
+#   Lower thresholds mean more tracks on clutter, shadows and chair backs.
+#   Deliberate: a false box costs a glance, a missed fall costs far more.
+
+tracker_type: bytetrack
+
+# 0.25 -> 0.15. First-stage association. A prone body rarely clears 0.25.
+track_high_thresh: 0.15
+
+# 0.1 -> 0.05. Second-stage association, ByteTrack's whole point: keep a track
+# alive on detections too weak to be trusted on their own.
+track_low_thresh: 0.05
+
+# 0.25 -> 0.10. THE IMPORTANT ONE. Matches the DET_CONF floor, so anything that
+# gets past the detector can also become a track instead of being dropped for
+# lack of an ID.
+new_track_thresh: 0.10
+
+# 30 -> 90 frames. At 3-8 fps inference, 30 frames is only 4-10 seconds of
+# memory — shorter than someone spends on the floor. 90 gives 12-30 seconds.
+track_buffer: 90
+
+# 0.8 -> 0.85. A body changes shape drastically as it falls, so consecutive
+# boxes overlap less than they do for someone walking.
+match_thresh: 0.85
+
+fuse_score: true

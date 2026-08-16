@@ -272,6 +272,7 @@ raw_lock = threading.Lock()
 # hold ~92 MB per camera in the rolling buffer. Two cameras ≈ 184 MB. If you
 # add more cameras or increase resolution, watch this number.
 import math
+import json
 from datetime import datetime
 
 # Inference frame size. Capture frames are downscaled to this before pose
@@ -345,36 +346,185 @@ _clip_next_append = {cam_id: 0.0 for cam_id, _ in CAMERAS}
 _clip_cooldown_until = {cam_id: 0.0 for cam_id, _ in CAMERAS}
 
 
-def _record_alert_clip(cam_id, clip_path, alert_payload):
-    """Worker (daemon thread): wait POSTROLL_S, snapshot frames, write mp4.
+
+
+
+
+# ── Incident-scoped clips ────────────────────────────────────────────────────
+# One incident, one clip, named for the WORST thing that happened during it.
+#
+# Previously the filename was fixed by the FIRST alert and the file written 5s
+# later, so a slow descent saved as "lying_down" even after it escalated to a
+# fall 20s on. The recording now stays open while the incident keeps producing
+# alerts (each one pushes the deadline out, capped by CLIP_INCIDENT_MAX_S) and
+# the name is chosen at write time from the highest-ranked classification seen.
+#
+# Alerts still fire immediately — only the video file is delayed.
+CLIP_INCIDENT_MAX_S = float(os.getenv("CLIP_INCIDENT_MAX_S", "45"))
+
+# Hard cap on simultaneous recordings per camera.
+#
+# Incidents became per-person so two residents get two clips. But ByteTrack
+# mints a new id every time an intermittently-visible person reappears, so one
+# fall can spawn a dozen ids — and each one opened its own 45s recording,
+# every worker JPEG-encoding at CLIP_FPS. Thirty concurrent incidents is 300
+# encodes/sec competing with YOLO, which is where the fps drop came from.
+#
+# Two genuine residents falling together still both get clips; it is the
+# churn-generated duplicates beyond that which get dropped.
+CLIP_MAX_CONCURRENT = int(os.getenv("CLIP_MAX_CONCURRENT", "3"))
+_CLIP_LABEL_RANK = {"prolonged_fall": 4, "fall_detected": 3,
+                    "lying_down": 2, "inactivity": 1}
+
+# ── Static HUD on saved clips ────────────────────────────────────────────────
+# The live HUD reports the WORST STATUS OF THE CURRENT FRAME, which is correct
+# for a monitor someone is watching: it has to follow the scene. It is wrong
+# for a saved incident clip. Detection of a body on the floor is intermittent,
+# so across the frames of one lying-down incident the band reads
+#
+#     "WORST: LYING DOWN"  -> orange
+#     "WORST: NO PERSON"   -> grey     (the detector lost them for a moment)
+#     "WORST: NORMAL"      -> green    (a track re-appeared before committing)
+#
+# and the clip flickers between three colours while showing one continuous
+# event. Whoever reviews it sees "normal" stamped over a person on the floor.
+#
+# So the clip gets its own band, redrawn at write time in the incident's FINAL
+# classification — the same label the file is named for. It is resolved once
+# the incident closes, which is exactly why this cannot be done while the
+# frames are being captured: the pre-roll is recorded before the event is
+# even classified, and a lying-down can still escalate to a fall afterwards.
+# The per-frame wall clock is preserved so the clip stays reviewable.
+# Set CLIP_STATIC_HUD=0 to keep the live band in saved clips.
+CLIP_STATIC_HUD = os.getenv("CLIP_STATIC_HUD", "1") == "1"
+_CLIP_LABEL_STATUS = {
+    "prolonged_fall": "PROLONGED FALL",
+    "fall_detected":  "FALL DETECTED",
+    "lying_down":     "LYING DOWN",
+    "inactivity":     "INACTIVE",
+    "agitation":      "AGITATION_RISK",
+    "pacing":         "PACING DETECTED",
+}
+# Keyed by (cam_id, track_id), NOT by camera. Keying on the camera merged two
+# different people into one incident: a lying-down for ID 12 and a fall for
+# ID 55 became a single clip named for the worse of the two, and one of the
+# events vanished entirely. One person, one incident, one clip.
+_clip_incidents      = {}     # (cam_id, track_id) -> incident dict
+_clip_incident_lock  = threading.Lock()
+# (cam_id, track_id) -> last time THAT track was FALLEN. The recording stays
+# open while this keeps updating, so the clip spans the whole time the person
+# is down rather than closing in the gaps between alerts. The persistence path
+# holds FALLEN even with no detection, so an unseen person keeps it alive too.
+_clip_fallen_seen    = {}
+
+
+# Track-ID aliases created by re-association. When ByteTrack renames a person
+# mid-incident, the alert path must keep writing into the ORIGINAL incident
+# rather than opening a second recording of the same fall. The running clip
+# worker already holds its key as a local, so we redirect lookups instead of
+# rewriting the dicts underneath it.
+_clip_alias = {}     # (cam_id, new_tid) -> (cam_id, original_tid)
+
+
+def _canonical_clip_key(cam_id, track_id):
+    key = (cam_id, track_id)
+    for _ in range(8):          # bounded: alias chains cannot loop forever
+        nxt = _clip_alias.get(key)
+        if nxt is None or nxt == key:
+            break
+        key = nxt
+    return key
+
+
+def alias_clip_track(cam_id, old_tid, new_tid):
+    """Point (cam, new_tid) at whatever incident (cam, old_tid) belongs to."""
+    canon = _canonical_clip_key(cam_id, old_tid)
+    if canon != (cam_id, new_tid):
+        _clip_alias[(cam_id, new_tid)] = canon
+
+
+def note_fallen(cam_id, track_id, now):
+    with _clip_incident_lock:
+        _clip_fallen_seen[_canonical_clip_key(cam_id, track_id)] = now
+
+
+def _clip_label_rank(label):
+    return _CLIP_LABEL_RANK.get(label, 0)
+
+
+def _jpg(frame):
+    """Buffer frames JPEG-encoded. A 45s incident at CLIP_FPS would be ~460MB
+    raw at 720x480; encoded it is ~20MB, which matters on a box already
+    running YOLO."""
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return buf.tobytes() if ok else None
+
+
+def _record_alert_clip(cam_id, key, inc):
+    """Worker (daemon thread): record until the incident stops extending,
+    then write one mp4 named for the worst classification it reached.
 
     Snapshots the rolling pre-roll buffer immediately so we don't lose pre-
-    incident context if the buffer rolls during the post-roll wait. Then
-    samples cam_frames at CLIP_FPS for POSTROLL_S to capture the aftermath.
-    On finish, emits `cctv_alert_clip` so the backend can stamp clipPath
-    onto the matching Incident document.
+    incident context. On finish, emits `cctv_alert_clip` so the backend can
+    stamp clipPath onto the matching Incident document.
     """
-    # 1) Snapshot pre-roll IMMEDIATELY (before sleeping). The inference thread
-    #    keeps appending during our sleep, but the snapshot we hold is frozen.
-    with clip_buffer_lock:
-        pre_roll = [f.copy() for _, f in clip_buffers[cam_id]]
+    alert_payload = inc["payload"]
 
-    # 2) Sample cam_frames at fixed cadence for POSTROLL_S seconds.
+    # 1) Snapshot pre-roll IMMEDIATELY. The inference thread keeps appending
+    #    during our wait, but the snapshot we hold is frozen.
+    # (capture_time, jpeg) — the timestamp is carried through so the static
+    # band can keep each frame's real wall clock when it repaints the bar.
+    with clip_buffer_lock:
+        pre_roll = [(ts, _jpg(f)) for ts, f in clip_buffers[cam_id]]
+
+    # 2) Sample cam_frames at fixed cadence until the incident closes. Each
+    #    new alert for this camera pushes `end_at` later, up to the cap.
     post_roll = []
     sample_dt = 1.0 / max(1, CLIP_FPS)
-    deadline  = time.time() + CLIP_POSTROLL_S
     next_t    = time.time()
-    while time.time() < deadline:
+    while True:
+        with _clip_incident_lock:
+            # Keep recording while the person is still down, capped so a
+            # permanently-held FALLEN track can't record forever.
+            fallen_at = _clip_fallen_seen.get(key, 0.0)
+            deadline = min(max(inc["end_at"], fallen_at + CLIP_POSTROLL_S),
+                           inc["opened"] + CLIP_INCIDENT_MAX_S)
+        if time.time() >= deadline or _shutting_down:
+            break
         sleep_for = next_t - time.time()
         if sleep_for > 0:
             time.sleep(sleep_for)
         with lock:
             curr = cam_frames.get(cam_id)
             if curr is not None:
-                post_roll.append(curr.copy())
+                post_roll.append((time.time(), _jpg(curr)))
         next_t += sample_dt
 
-    all_frames = pre_roll + post_roll
+    # 3) Incident is over — resolve the filename from the worst label reached.
+    with _clip_incident_lock:
+        label = inc["label"]
+        inc["done"] = True
+        if _clip_incidents.get(key) is inc:
+            _clip_incidents.pop(key, None)
+        _clip_fallen_seen.pop(key, None)
+    clip_path = CLIP_DIR / (f"{inc['cam']}_{label}_{inc['ts']}_{inc['key']}.mp4")
+
+    # Decode, then stamp the incident's FINAL classification over the live
+    # band so the whole clip carries one colour instead of following the
+    # detector's frame-by-frame opinion. See CLIP_STATIC_HUD.
+    status_label = _CLIP_LABEL_STATUS.get(label, label.replace("_", " ").upper())
+    bar_color    = status_color(status_label)
+    all_frames = []
+    for ts, b in (pre_roll + post_roll):
+        if b is None:
+            continue
+        frm = cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_COLOR)
+        if frm is None:
+            continue
+        if CLIP_STATIC_HUD:
+            draw_status_bar(frm, cam_id, f"INCIDENT: {status_label}", bar_color,
+                            clock=time.strftime("%H:%M:%S", time.localtime(ts)))
+        all_frames.append(frm)
     if not all_frames:
         print(f"[CLIP] {cam_id}: no frames captured, skipping save")
         return
@@ -441,6 +591,29 @@ def _maybe_buffer_frame(cam_id, frame):
 # cross-contaminate IDs between cameras (House of Charbel person becoming
 # House of Gabriel person). See process_camera_thread for the per-thread load.
 POSE_MODEL_PATH = os.getenv("POSE_MODEL_PATH", "yolo11m-pose.pt")
+
+# Detection confidence floor, applied BEFORE the tracker sees anything.
+# bytetrack.yaml already accepts detections down to track_low_thresh 0.1, but
+# this gate discards them first, so the tracker never gets the chance. A person
+# lying on the floor commonly scores 0.15-0.30 where the same person standing
+# scores 0.85 — at 0.25 they simply cease to exist. Set DET_CONF=0.25 in .env
+# to restore the previous behaviour.
+DET_CONF = float(os.getenv("DET_CONF", "0.10"))
+
+# Minimum confident keypoints for a detection to count as a person. The low
+# DET_CONF above is needed to see a body on the floor, but it also admits
+# boxes on furniture and shadows, and a stationary ghost will eventually fire
+# an inactivity alert. Five of seventeen is lenient — a heavily occluded
+# person still clears it, a hallucinated box generally does not.
+MIN_CONFIDENT_KPTS = int(os.getenv("MIN_CONFIDENT_KPTS", "5"))
+
+# Tracker config. Stock bytetrack.yaml has new_track_thresh 0.25, which is
+# ABOVE the DET_CONF floor above — so a weak detection reaches the tracker but
+# is refused a track ID, and line ~1733 then discards it. bytetrack_fall.yaml
+# lowers that to match. Set TRACKER_CFG=bytetrack.yaml to use the stock file.
+TRACKER_CFG = os.getenv("TRACKER_CFG", os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "bytetrack_fall.yaml"))
+
 print(f"[INIT] Pose model configured: {POSE_MODEL_PATH}")
 print(f"[INIT]   (per-camera instances loaded inside each inference thread)")
 
@@ -521,18 +694,29 @@ except (ValueError, AttributeError) as e:
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Module C — Fall Detection
-# Raised from 0.35 → 0.45 to filter junk keypoints. YOLOv8-pose returns
-# low-confidence keypoint guesses for occluded body parts; at 0.35 those
-# guesses dragged the torso-angle calculation around (sometimes spiking
-# 20–30° when the hip keypoint flickered). 0.45 trades occasional
-# partial-pose detection for substantially cleaner angle math.
-POSE_CONF_THRESHOLD      = 0.45
-FALL_ANGLE_THRESHOLD        = 65.0   # torso degrees from vertical → LYING
-STUMBLE_ANGLE_THRESHOLD     = 60.0   # torso degrees → transitional / at-risk (raised to avoid bending false positives)
-FALL_HEIGHT_RATIO_THRESHOLD = 0.50   # bbox height / standing-reference below this → fall toward/away from camera
+# Lowered from 0.45 → 0.35 to allow fall detection when hip keypoints are
+# partially occluded (common for crouching/fallen poses on overhead cameras).
+# The angle + aspect dual-condition gates still prevent junk keypoints from
+# firing false alerts.
+POSE_CONF_THRESHOLD      = 0.35
+FALL_ANGLE_THRESHOLD        = 28.0   # lowered from 65° — overhead cameras project crouching/falling as ~25-35°
+STUMBLE_ANGLE_THRESHOLD     = 18.0   # must stay below FALL_ANGLE_THRESHOLD
+FALL_HEIGHT_RATIO_THRESHOLD = 0.72   # raised from 0.65 — catch overhead falls where bbox shrinks less
+# Path B's own comment says the aspect gate exists to stop "a person walking
+# away from the camera gets smaller but stays upright" from firing this path,
+# and names 1.2 as the value. The code used 1.5. On fall3_slow.mp4 a standing
+# man across the room measured aspect 1.40 — inside the 1.5 gate, outside the
+# 1.2 one — and was classified FALLEN. Restoring the documented number.
+FALL_PATH_B_ASPECT_MAX      = float(os.getenv("FALL_PATH_B_ASPECT_MAX", "1.2"))
+# Gate on body_extent_ratio(): Path B may only fire when the skeleton agrees
+# the body is compressed. Measured on fall3_slow.mp4 — lying 1.32-1.70,
+# upright 3.31-3.60 — so 2.5 sits in the empty middle with margin on both
+# sides. Unmeasurable torso => the gate abstains and Path B behaves as before;
+# a missing measurement must never suppress a fall.
+FALL_EXTENT_MAX             = float(os.getenv("FALL_EXTENT_MAX", "2.5"))
 FALL_FRAMES_REQUIRED        = 3      # consecutive frames before fall alert fires (~0.3s at inference FPS)
 STUMBLE_FRAMES_REQUIRED     = 4      # higher than fall — stumble is noisier, needs more confirmation
-FALL_ALERT_COOLDOWN_S       = 15.0   # seconds before same alert can repeat
+FALL_ALERT_COOLDOWN_S       = 15.0  # seconds before same alert can repeat
 
 # Module D — Behavioral Monitoring
 # ── Switch between TEST and PRODUCTION values here ────────────────────────────
@@ -652,6 +836,118 @@ else:
 FALL_RATE_THRESHOLD      = 45.0
 FALL_RATE_WINDOW_S       = 2.5    # lookback for peak rise (long enough at 3 fps)
 
+# ── Angle history is bounded by TIME, not frame count ────────────────────────
+# THE LATENT BUG THIS FIXES: `_angle_history` was `deque(maxlen=60)` — sixty
+# SAMPLES — while every consumer treats it as a time window:
+#
+#   _get_angle_rate(window_s=2.5)  filters by timestamp, then measures the rise
+#   _never_seen_upright()          asks "was this person ever upright?"
+#
+# Sixty samples is ~10-20 s at the 3-8 fps the comment assumed, but the length
+# in SECONDS is whatever the inference rate happens to be:
+#
+#     3 fps  -> 20 s of history      (as designed)
+#     25 fps -> 2.4 s                (rate window silently truncated)
+#     120 fps-> 0.5 s                (rate window is a fifth of its setting)
+#
+# Two consequences, both observed on fall1_slow.mp4:
+#   * `_get_angle_rate` anchors on the minimum angle in the last 2.5 s. When
+#     only 0.5 s of history exists, the anchor is a much larger angle and dt is
+#     much smaller, so the computed rate INFLATES — a controlled sit-down
+#     measured 28 deg/s at 8 fps and 76 deg/s over the same footage at 120 fps.
+#     That is the difference between "LYING DOWN" and "FALL DETECTED (HIGH
+#     CONFIDENCE)", produced purely by how fast the host machine runs.
+#   * `_never_seen_upright()` forgets a person was standing after two seconds
+#     on a fast host, which routes ordinary events into the unwitnessed path.
+#
+# So the same recording classifies differently on a GPU box than on a CPU box.
+# Bounding by time makes the behaviour a property of the footage instead.
+ANGLE_HISTORY_S       = float(os.getenv("ANGLE_HISTORY_S", "30"))
+# Hard memory cap only — the time prune is what actually bounds the window.
+# 1200 samples covers 30 s at 40 fps; beyond that the oldest entries drop.
+ANGLE_HISTORY_MAXLEN  = int(os.getenv("ANGLE_HISTORY_MAXLEN", "1200"))
+
+# ── Unwitnessed-fall gate ────────────────────────────────────────────────────
+# `_never_seen_upright()` promotes "this track has no record of standing" into
+# an immediate EMERGENCY. That is right for a resident found on the floor after
+# a detection gap, and wrong for a track that is two frames old — and a
+# two-frame-old track is precisely what a ByteTrack ID switch produces. One
+# person on the floor churning through ids 7 / 19 / 20 fired three separate
+# emergencies, which is the redundancy in the logs.
+#
+# Track re-association (see REASSOC_* below) is the real fix; this is the
+# backstop. A track must have existed this long, and supplied this many pose
+# frames, before it may raise an unwitnessed fall on the spot. Below the gate
+# the fall is not discarded — it is routed through the lying-confirm timer and
+# still fires as an EMERGENCY FALL once sustained, just LYING_CONFIRM_SECONDS
+# later. Severity is preserved; only the trigger-happiness is removed.
+UNWITNESSED_MIN_AGE_S  = float(os.getenv("UNWITNESSED_MIN_AGE_S", "1.5"))
+UNWITNESSED_MIN_FRAMES = int(os.getenv("UNWITNESSED_MIN_FRAMES", "5"))
+
+# ── Displacement gate on the fast-fall path ──────────────────────────────────
+# THE DEFECT THIS FIXES: `_get_angle_rate()` measures how fast the ESTIMATE
+# changed, not how fast the BODY moved. Those are the same thing only while
+# the pose estimate is stable. They come apart in exactly the situations that
+# matter here:
+#
+#   * keypoint flicker on an ambiguous horizontal body — YOLO alternates
+#     between two plausible skeletons and the torso angle swings 60 degrees
+#     between consecutive frames with nobody moving at all;
+#   * a person who was ALREADY reclined, held at NORMAL by the seated or
+#     furniture guard, and then reclassified — the angle "rises" the instant
+#     the guard releases;
+#   * a track that picks the person up mid-pose after a detection gap.
+#
+# In all three the computed rate is enormous (100-200 deg/s) and the code
+# reads that as a violent collapse. A stationary person becomes an EMERGENCY.
+#
+# The discriminator: a real fall MOVES THE BODY. The centre of mass drops and
+# the bounding box collapses. A re-classification does neither. So before the
+# fast path may fire, require corroborating displacement over the same window
+# the rate was measured on — measured in units of the person's own standing
+# height, so it needs no calibration.
+#
+# FAIL OPEN, deliberately: when there is not enough history to measure
+# displacement, the gate ABSTAINS and the fall is allowed through. A missing
+# measurement must never silence a real emergency — the gate exists to reject
+# positive evidence of "nothing moved", not to demand proof of motion.
+FALL_MOTION_GATE_ON   = os.getenv("FALL_MOTION_GATE", "1") == "1"
+# Fraction of standing height the body centre must drop.
+FALL_MIN_DESCENT      = float(os.getenv("FALL_MIN_DESCENT", "0.15"))
+# ...or the fraction of standing height the bbox must lose. Either satisfies
+# the gate: a fall directly toward the camera barely moves the centroid but
+# collapses the box, and a fall across the view does the opposite.
+FALL_MIN_HEIGHT_DROP  = float(os.getenv("FALL_MIN_HEIGHT_DROP", "0.20"))
+FALL_MOTION_DEBUG     = os.getenv("FALL_MOTION_DEBUG", "0") == "1"
+
+# ── Track re-association across ID switches ──────────────────────────────────
+# When a person changes shape drastically — which is exactly what falling is —
+# ByteTrack frequently retires the track and mints a new id. Every downstream
+# state machine is keyed by that id, so the new id starts with: no angle
+# history (→ spurious "UNWITNESSED"), no standing-height reference (→ Path B
+# recalibrates against the fallen bbox), and fresh cooldowns (→ the alert
+# repeats). Meanwhile the abandoned id keeps ticking under PERSIST_FALLEN and
+# emits its own "NO LONGER VISIBLE" alert for the same person.
+#
+# So: when an unseen id disappears and a new id appears overlapping its last
+# known box within REASSOC_MAX_GAP_S, treat it as the same person and move the
+# state across. IoU is enough here — we are matching a box to the box it was
+# occupying a moment ago, not re-identifying across a room.
+REASSOC_ON          = os.getenv("REASSOC", "1") == "1"
+REASSOC_MAX_GAP_S   = float(os.getenv("REASSOC_MAX_GAP_S", "3.0"))
+REASSOC_MIN_IOU     = float(os.getenv("REASSOC_MIN_IOU", "0.35"))
+REASSOC_DEBUG       = os.getenv("REASSOC_DEBUG", "0") == "1"
+
+# ── Camera-level duplicate suppression ───────────────────────────────────────
+# Belt and braces behind re-association. Two fall-family alerts describing the
+# same patch of floor within this window are the same event, whatever the
+# tracker thinks. Escalation is still allowed through: a LYING DOWN followed by
+# a real FALL in the same spot is an upgrade, not a duplicate, so the higher
+# rank always passes and re-arms the window.
+FALL_DEDUP_ON     = os.getenv("FALL_DEDUP", "1") == "1"
+FALL_DEDUP_S      = float(os.getenv("FALL_DEDUP_S", "25"))
+FALL_DEDUP_MIN_IOU = float(os.getenv("FALL_DEDUP_MIN_IOU", "0.25"))
+
 # ── Lying-down confirmation ──────────────────────────────────────────────────
 # When the FallStateMachine classifies a transition to FALLEN as slow/controlled
 # (angle_rate < FALL_RATE_THRESHOLD), we DO NOT alert immediately. Instead we
@@ -667,6 +963,42 @@ FALL_RATE_WINDOW_S       = 2.5    # lookback for peak rise (long enough at 3 fps
 # Fast falls (angle_rate >= FALL_RATE_THRESHOLD) bypass this timer entirely;
 # emergencies must alert as fast as the FALL_FRAMES_REQUIRED window allows.
 LYING_CONFIRM_SECONDS    = 3.0
+
+# ── Persist a fallen person through detection loss ───────────────────────────
+# A body on the floor is the HARDEST thing for the detector to see, so the
+# track lapses exactly when it matters most. Previously that meant:
+#   * update() stopped being called, so the lying-confirm timer froze
+#     mid-count and the alert never fired
+#   * the GC deleted the state machine after TRACK_TIMEOUT_S (5s), erasing
+#     the fact that anyone had fallen at all
+# The net effect is worst for a person who does not move after falling — the
+# unconscious case — because stillness makes redetection least likely.
+#
+# This does NOT try to see them. It only stops the system forgetting: a track
+# already classified FALLEN keeps its timers running from its last known state,
+# so confirmation and prolonged-fall alerts still fire with no new detections.
+PERSIST_FALLEN_ON  = os.getenv("PERSIST_FALLEN", "1") == "1"
+FALLEN_TIMEOUT_S   = float(os.getenv("FALLEN_TIMEOUT_S", "300"))
+
+# Accuracy guards for the unseen path. Continuing a conclusion is only sound
+# when the disappearance itself is unexplained:
+#   * a track last seen touching the frame border probably walked out, and
+#     holding it as fallen for five minutes would be a false alarm
+#   * a track that vanished after only a moment of FALLEN never really
+#     established the state; requiring a minimum dwell stops a single noisy
+#     frame from being carried indefinitely
+# 20px, not 45. At 45 a fall beside a desk or low in the frame was rejected as
+# "probably walked out" — two of four plausible fall positions in a 720x480
+# frame. Only a box genuinely touching the border should count as an exit.
+PERSIST_EDGE_MARGIN = int(os.getenv("PERSIST_EDGE_MARGIN", "20"))
+# PERSIST_DEBUG=1 explains why a lost track was or wasn't carried.
+PERSIST_DEBUG = os.getenv("PERSIST_DEBUG", "0") == "1"
+# 0.3s, not 1.0s. Detection of a body on the floor typically dies within a
+# frame or two of the fall, so a 1s dwell requirement was rejecting exactly the
+# cases persistence exists for. FALL_FRAMES_REQUIRED already demands 3
+# consecutive frames before FALLEN commits, so this is a second filter on top
+# of an existing one — it only needs to reject a single-frame flicker.
+PERSIST_MIN_FALLEN_S = float(os.getenv("PERSIST_MIN_FALLEN_S", "0.3"))
 
 # Keypoint indices (COCO-17)
 LEFT_SHOULDER,  RIGHT_SHOULDER  = 5,  6
@@ -695,12 +1027,464 @@ def get_torso_angle(kpts):
     dy = hip_mid[1] - sh_mid[1]
     return abs(np.degrees(np.arctan2(dx, dy if abs(dy) > 1e-6 else 1e-6)))
 
+
+
+
+
+
+
+
+
+
+
+# ── Seated guard ─────────────────────────────────────────────────────────────
+# Path B fires on bbox height alone (`height_ratio < 0.72`) with no angle
+# condition, and sitting collapses height to ~55-70% of standing — squarely
+# inside that window. By height, sitting and falling are identical.
+#
+# The knees separate them: ~60-95° seated, 160-180° lying flat. Knee flexion is
+# an angle between three keypoints, so it needs no calibration.
+#
+# TWO SAFEGUARDS, both learned the hard way:
+#   1. SEATED_OVERRIDE_HRATIO — below this the body is unambiguously at floor
+#      level and the guard gets no vote. Without it the guard suppressed
+#      FALLEN outright, which also killed the "NO LONGER VISIBLE" persistence,
+#      because tick_absent() only continues a track that reached FALLEN.
+#   2. Stickiness is short. At 2.5s the dwell spanned the whole time a person
+#      stayed visible, so they never reached FALLEN at all.
+SEATED_GUARD_ON        = os.getenv("SEATED_GUARD", "1") == "1"
+KNEE_BENT_MAX_DEG      = float(os.getenv("KNEE_BENT_MAX_DEG", "120"))
+KNEE_DEEP_DEG          = float(os.getenv("KNEE_DEEP_DEG", "95"))
+# Anatomical floor. Heel-to-buttock is roughly 30-40 degrees at the human
+# limit, so anything below this is a bad keypoint estimate, not a deep squat.
+# Observed on a man lying on the floor with folded legs: "seated L28/R21",
+# which suppressed a genuine fall. Implausible angles must count as no
+# evidence rather than as strong evidence.
+KNEE_MIN_PLAUSIBLE_DEG = float(os.getenv("KNEE_MIN_PLAUSIBLE_DEG", "40"))
+
+# A torso angle at or below this counts as "we saw them upright". If a track's
+# whole angle history sits above it, the descent was never observed.
+UPRIGHT_ANGLE_MAX = float(os.getenv("UPRIGHT_ANGLE_MAX", "25"))
+SEATED_TORSO_MAX       = float(os.getenv("SEATED_TORSO_MAX", "30"))
+SEATED_TORSO_MAX_DEEP  = float(os.getenv("SEATED_TORSO_MAX_DEEP", "70"))
+SEATED_STICKY_S        = float(os.getenv("SEATED_STICKY_S", "1.2"))
+SEATED_OVERRIDE_HRATIO = float(os.getenv("SEATED_OVERRIDE_HRATIO", "0.45"))
+
+# ── Hip flexion — ankle-free seated evidence ─────────────────────────────────
+# The knee test above needs hip+knee+ankle all confident on one leg. On a sofa
+# the near leg is routinely hidden by an armrest or foreshortened to nothing,
+# so `seen` comes back empty and the guard ABSTAINS on exactly the pose it was
+# written for. That is why a seated resident still reached FALLEN.
+#
+# Hip flexion is the shoulder→hip→knee angle. It needs no ankle:
+#     lying flat, legs extended   ~170-180  (shoulder, hip, knee collinear)
+#     reclined on a sofa          ~130-155
+#     sitting upright             ~85-100   (torso vertical, thighs horizontal)
+# You cannot lie flat on the floor with your torso folded onto your thighs, so
+# a low value is positive evidence of support under the buttocks.
+#
+# Weaker evidence than the knee test — a foetal position on the floor also
+# folds the hip — so it gets its own, tighter torso allowance and never counts
+# as `deep`. The floor-level height override still outranks it.
+# 145, not 130. Measured on synthetic skeletons: sitting upright reads ~90,
+# reclining 35-45 degrees on a sofa reads 130-140, and lying flat with the legs
+# out reads 170-180. At 130 the recliner — the exact pose in the report — fell
+# on the wrong side of the line.
+#
+# THE TRADE-OFF, stated plainly: raising this suppresses more sofa poses AND
+# makes it likelier that a resident who has slid down a wall into a slumped
+# floor position is read as "seated". 145 keeps a clear margin below flat-out
+# lying, and the furniture zones are the primary defence for the sofa — this
+# guard is the no-setup fallback, so it does not need to be pushed further.
+# Lower it toward 120 if you would rather have sofa false alarms than miss a
+# slumped resident; that is a clinical judgement, not a technical one.
+HIP_FLEX_GUARD_ON       = os.getenv("HIP_FLEX_GUARD", "1") == "1"
+HIP_FLEX_SEATED_MAX     = float(os.getenv("HIP_FLEX_SEATED_MAX", "145"))
+# Below this the three points are effectively folded onto each other, which is
+# a keypoint-collapse artefact rather than a real posture.
+HIP_FLEX_MIN_PLAUSIBLE  = float(os.getenv("HIP_FLEX_MIN_PLAUSIBLE", "25"))
+# Oblique/overhead CCTV projects a seated torso well past SEATED_TORSO_MAX=30,
+# which is the second reason the guard never fired on the sofa. Hip-flexion
+# evidence carries a larger allowance because the fold itself already rules
+# out lying flat.
+SEATED_TORSO_MAX_HIPFLEX = float(os.getenv("SEATED_TORSO_MAX_HIPFLEX", "75"))
+
+# ── Furniture zones — "lying down means ON THE FLOOR" ────────────────────────
+# Honest statement of the limit this works around: in an uncalibrated oblique
+# monocular view, height above the floor is NOT observable. A body reclining on
+# a sofa and a body on the carpet in front of it project nearly identical
+# skeletons. No threshold on torso angle or bbox ratio can separate them,
+# because the information is not in the image. The only fix is to tell the
+# system where the furniture is.
+#
+# Zones are per camera, drawn once, and stored in JSON:
+#
+#   {
+#     "Test_Falls_2": [
+#       {"name": "sofa", "rect": [0.42, 0.55, 0.72, 0.80]},
+#       {"name": "bed",  "poly": [[120,300],[400,300],[400,430],[120,430]]}
+#     ]
+#   }
+#
+# Coordinates may be normalised (every value 0..1, resolution-independent —
+# preferred) or absolute pixels in INFERENCE_W x INFERENCE_H space. Use
+# draw_zones.py to click them out on a still frame.
+#
+# A person whose HIP MIDPOINT falls inside a zone is being held up by
+# furniture, so the fall paths are suppressed for them. Draw zones TIGHT to
+# the seat/mattress surface: from an oblique camera the floor immediately in
+# front of a sofa projects close to the seat itself, and an over-large zone
+# will swallow a genuine fall beside the furniture.
+#
+# FURNITURE_MODE:
+#   "all"  (default) — no FALLEN state at all inside a zone. Matches "lying
+#          down should only be on the floor" literally: no red box, no alert.
+#   "slow" — only the slow/lie-down path is suppressed; a fast collapse still
+#          raises an EMERGENCY even inside the zone. Safer, but a seated
+#          resident may still flash a red box on a noisy frame.
+# Empty config = zero behaviour change, so this is inert until you draw zones.
+FURNITURE_ZONES_FILE = os.getenv(
+    "FURNITURE_ZONES_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 "furniture_zones.json"))
+FURNITURE_MODE  = os.getenv("FURNITURE_MODE", "all").strip().lower()
+FURNITURE_DEBUG = os.getenv("FURNITURE_DEBUG", "0") == "1"
+
+_FURNITURE_ZONES = {}     # cam_id -> list of {"name": str, "pts": np.int32 (N,2)}
+
+
+def _load_furniture_zones():
+    """Parse FURNITURE_ZONES_FILE into pixel-space contours, once at startup.
+
+    Any malformed entry is skipped with a warning rather than raising — a typo
+    in a zone file must never stop the cameras coming up.
+    """
+    zones = {}
+    if not os.path.isfile(FURNITURE_ZONES_FILE):
+        print(f"[ZONES] no furniture zone file at {FURNITURE_ZONES_FILE} — "
+              f"furniture suppression disabled")
+        return zones
+    try:
+        with open(FURNITURE_ZONES_FILE, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except Exception as err:
+        print(f"[ZONES] failed to read {FURNITURE_ZONES_FILE}: {err} — "
+              f"furniture suppression disabled")
+        return zones
+
+    for cam_id, entries in (raw or {}).items():
+        parsed = []
+        for entry in entries or []:
+            try:
+                name = entry.get("name", "zone")
+                if "rect" in entry:
+                    x1, y1, x2, y2 = [float(v) for v in entry["rect"]]
+                    pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+                elif "poly" in entry:
+                    pts = [(float(p[0]), float(p[1])) for p in entry["poly"]]
+                    if len(pts) < 3:
+                        raise ValueError("poly needs >= 3 points")
+                else:
+                    raise ValueError("entry has neither 'rect' nor 'poly'")
+
+                # Normalised coords iff every value is within 0..1.
+                if all(0.0 <= v <= 1.0 for p in pts for v in p):
+                    pts = [(x * INFERENCE_W, y * INFERENCE_H) for x, y in pts]
+
+                parsed.append({
+                    "name": name,
+                    "pts":  np.array([[int(round(x)), int(round(y))]
+                                      for x, y in pts], dtype=np.int32),
+                })
+            except Exception as err:
+                print(f"[ZONES] {cam_id}: skipping bad zone {entry!r}: {err}")
+        if parsed:
+            zones[cam_id] = parsed
+            print(f"[ZONES] {cam_id}: loaded {len(parsed)} furniture zone(s): "
+                  + ", ".join(z["name"] for z in parsed))
+    if not zones:
+        print("[ZONES] furniture zone file contained no usable zones")
+    return zones
+
+
+def furniture_zone_at(cam_id, point):
+    """Name of the furniture zone containing `point`, or None.
+
+    `point` is (x, y) in INFERENCE_W x INFERENCE_H pixel space.
+    """
+    if point is None:
+        return None
+    for z in _FURNITURE_ZONES.get(cam_id, ()):
+        if cv2.pointPolygonTest(z["pts"], (float(point[0]), float(point[1])),
+                                False) >= 0:
+            return z["name"]
+    return None
+
+
+def support_point(kpts, box):
+    """Best estimate of where the body's weight is resting, in pixels.
+
+    Hip midpoint when both hips are confident — that is what a sofa or bed
+    actually holds up. Falls back to the bbox centre so the zone test still
+    works on a partially-occluded detection.
+    """
+    if kpts is not None and \
+            point_conf(kpts[LEFT_HIP]) >= POSE_CONF_THRESHOLD and \
+            point_conf(kpts[RIGHT_HIP]) >= POSE_CONF_THRESHOLD:
+        return midpoint(kpts[LEFT_HIP][:2], kpts[RIGHT_HIP][:2])
+    x1, y1, x2, y2 = box
+    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+
+def draw_furniture_zones(frame, cam_id):
+    """Faint outline of each configured zone, so operators can see the mask."""
+    for z in _FURNITURE_ZONES.get(cam_id, ()):
+        cv2.polylines(frame, [z["pts"]], True, (90, 90, 160), 1)
+        x, y = z["pts"][0]
+        cv2.putText(frame, z["name"], (int(x) + 3, int(y) + 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (90, 90, 160), 1)
+
+
+_FURNITURE_ZONES = _load_furniture_zones()
+
+
+def _joint_angle(a, b, c):
+    """Interior angle at joint `b` formed by a-b-c, in degrees, or None."""
+    v1 = (a[0] - b[0], a[1] - b[1])
+    v2 = (c[0] - b[0], c[1] - b[1])
+    n1, n2 = math.hypot(*v1), math.hypot(*v2)
+    if n1 < 1e-6 or n2 < 1e-6:
+        return None
+    cosang = (v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2)
+    return math.degrees(math.acos(max(-1.0, min(1.0, cosang))))
+
+
+def knee_flexion(kpts):
+    """(left, right) knee angles; either may be None. ~90 sitting, ~180 flat."""
+    out = []
+    for hip, knee, ankle in ((LEFT_HIP, LEFT_KNEE, LEFT_ANKLE),
+                             (RIGHT_HIP, RIGHT_KNEE, RIGHT_ANKLE)):
+        if all(point_conf(kpts[i]) >= POSE_CONF_THRESHOLD
+               for i in (hip, knee, ankle)):
+            out.append(_joint_angle(kpts[hip][:2], kpts[knee][:2], kpts[ankle][:2]))
+        else:
+            out.append(None)
+    return out[0], out[1]
+
+
+def hip_flexion(kpts):
+    """(left, right) shoulder-hip-knee angles; either may be None.
+
+    ~90 sitting upright, ~130-155 reclined, ~175 lying flat with legs out.
+    Deliberately ankle-free: the ankle is the keypoint a sofa hides.
+    """
+    out = []
+    sh_mid = midpoint(kpts[LEFT_SHOULDER][:2], kpts[RIGHT_SHOULDER][:2])
+    for hip, knee in ((LEFT_HIP, LEFT_KNEE), (RIGHT_HIP, RIGHT_KNEE)):
+        if (point_conf(kpts[hip]) >= POSE_CONF_THRESHOLD
+                and point_conf(kpts[knee]) >= POSE_CONF_THRESHOLD
+                and (point_conf(kpts[LEFT_SHOULDER]) >= POSE_CONF_THRESHOLD
+                     or point_conf(kpts[RIGHT_SHOULDER]) >= POSE_CONF_THRESHOLD)):
+            out.append(_joint_angle(sh_mid, kpts[hip][:2], kpts[knee][:2]))
+        else:
+            out.append(None)
+    return out[0], out[1]
+
+
+def looks_seated(kpts, torso_angle):
+    """Return (seated, deep) — seated verdict, and whether the knees are
+    deeply folded.
+
+    One visible bent knee is enough: armchairs hide a leg constantly, and
+    requiring both switched the guard off exactly where sitting happens.
+    The torso allowance is graded, since deeply folded knees permit far more
+    lean — nobody lies flat with their legs folded to 60°.
+
+    `deep` matters because a low armchair viewed from above can put a seated
+    person's bbox below the floor-level override, which would otherwise
+    disable the guard on the very pose it exists for.
+    """
+    if not SEATED_GUARD_ON:
+        return False, False
+    # Discard anatomically impossible angles — they are keypoint noise from
+    # folded or occluded legs, which is exactly what a body on the floor
+    # produces. Treating them as "deeply seated" masked real falls.
+    seen = [k for k in knee_flexion(kpts)
+            if k is not None and k >= KNEE_MIN_PLAUSIBLE_DEG]
+    if seen:
+        straighter = max(seen)
+        if straighter < KNEE_BENT_MAX_DEG:
+            deep = straighter < KNEE_DEEP_DEG
+            allowed = SEATED_TORSO_MAX_DEEP if deep else SEATED_TORSO_MAX
+            if torso_angle < allowed:
+                return True, deep
+        else:
+            # Legs are straight. That is a positive reading of "not seated",
+            # so do not let the weaker hip test overturn it.
+            return False, False
+
+    # No usable knee evidence (or knees bent but torso past the allowance) —
+    # fall through to hip flexion, which survives a hidden ankle. Never
+    # reports `deep`: it is the weaker signal and must not outrank the
+    # floor-level height override.
+    if not HIP_FLEX_GUARD_ON:
+        return False, False
+    hips = [h for h in hip_flexion(kpts)
+            if h is not None and h >= HIP_FLEX_MIN_PLAUSIBLE]
+    if not hips:
+        return False, False
+    # The straighter hip decides. One folded hip is common in a body sprawled
+    # on the floor; both folded, with a torso that is not flat, is a chair.
+    if max(hips) >= HIP_FLEX_SEATED_MAX:
+        return False, False
+    return (torso_angle < SEATED_TORSO_MAX_HIPFLEX), False
+
+
+def _iou(a, b):
+    """Intersection-over-union of two (x1, y1, x2, y2) boxes; 0.0 if either
+    is None. Used both to re-link a switched track ID to the box it just
+    vacated, and to recognise two alerts describing the same patch of floor."""
+    if a is None or b is None:
+        return 0.0
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = ix2 - ix1, iy2 - iy1
+    if iw <= 0 or ih <= 0:
+        return 0.0
+    inter = float(iw * ih)
+    area_a = max(ax2 - ax1, 0) * max(ay2 - ay1, 0)
+    area_b = max(bx2 - bx1, 0) * max(by2 - by1, 0)
+    union = float(area_a + area_b - inter)
+    return inter / union if union > 0 else 0.0
+
+
+def body_extent_ratio(kpts, bbox_h):
+    """bbox height measured in the person's OWN torso lengths, or None.
+
+    THE PROBLEM THIS SOLVES. Path B compares the current bbox height against
+    `_max_bbox_h`, the tallest box this track ever produced. That is a single
+    scalar for the whole room, and apparent height depends on RANGE, not just
+    posture. Measured on fall3_slow.mp4, one person, no posture change:
+
+        walks in near the camera   bbox 262 px
+        stands across the room     bbox  95 px   -> height ratio 0.36
+
+    0.36 is far below FALL_HEIGHT_RATIO_THRESHOLD, so Path B called a standing
+    man on the far side of the room "fallen". The same clip shows the inverse:
+    the person actually on the floor scored height ratio 0.86-0.99, because
+    their track began after they were already down and the reference was set
+    from the fallen box. Path B was reading distance, not posture.
+
+    Dividing bbox height by torso length cancels range — both shrink together.
+    Measured on the same clip:
+
+        standing, near or far      3.31 - 3.60
+        lying on the floor         1.32 - 1.70
+
+    A clean 2x margin with no calibration and no per-camera setup.
+
+    Returns None when the torso is not measurable, and callers MUST treat that
+    as "no opinion" rather than as evidence — see FALL_EXTENT_MAX.
+    """
+    if kpts is None or bbox_h is None or bbox_h <= 0:
+        return None
+    for i in (LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP):
+        if point_conf(kpts[i]) < POSE_CONF_THRESHOLD:
+            return None
+    sh_mid  = midpoint(kpts[LEFT_SHOULDER][:2], kpts[RIGHT_SHOULDER][:2])
+    hip_mid = midpoint(kpts[LEFT_HIP][:2],      kpts[RIGHT_HIP][:2])
+    torso_len = math.hypot(sh_mid[0] - hip_mid[0], sh_mid[1] - hip_mid[1])
+    if torso_len < 1e-3:
+        return None
+    return bbox_h / torso_len
+
+
 def get_body_aspect_ratio(box):
     """Returns bbox height/width. >1.5 = standing, <0.9 = likely fallen."""
     x1, y1, x2, y2 = box
     w = max(x2 - x1, 1)
     h = max(y2 - y1, 1)
     return h / w
+
+
+# ── Calibration-free posture ratios ──────────────────────────────────────────
+# Both measures divide one body measurement by another, so the person's own
+# skeleton is the ruler and distance from the camera cancels out. No per-camera
+# setup, no metres, identical constants on every scene.
+#
+#   elevation = (ankle_y - shoulder_y) / torso_length
+#       How high the shoulders sit above the feet, in torso-lengths.
+#       Standing ~2.5-3.0, sitting ~1.2-1.8, lying ~0-1.
+#
+#   compactness = full_body_extent / shoulder_width
+#       A standing body always projects roughly 3.5-4 shoulder-widths tall.
+#       When someone lies with their body pointing toward or away from the
+#       camera the length foreshortens and this collapses to ~1.5-2, even
+#       though the silhouette still looks upright. This is the only one of
+#       the two that sees through that projection, and it only reduces the
+#       blind spot rather than removing it.
+#
+# Thresholds below are derived from human proportion, NOT measured on this
+# footage — expect one tuning pass.
+POSTURE_RATIO_ON      = os.getenv("POSTURE_RATIO", "0") == "1"
+# Tuned against synthetic skeletons: standing 2.38/4.76, seated 1.77/3.85,
+# crouching 2.38/2.87, lying across view 0.23/4.76, lying along view 2.38/2.12.
+# These values clear seated and crouching while catching both lying poses.
+POSTURE_ELEVATION_MAX = float(os.getenv("POSTURE_ELEVATION_MAX", "1.00"))
+POSTURE_COMPACT_MAX   = float(os.getenv("POSTURE_COMPACT_MAX",   "2.40"))
+# The OR above was written on the reasoning that each ratio covers the other's
+# blind spot. That reasoning is sound in principle, but in practice it means
+# EITHER ratio alone can raise an EMERGENCY — and one of them was being
+# computed from a broken torso_len (see get_posture_ratios). Observed on a
+# seated resident: e=0.02 (fires) with c=4.12 (nowhere near its threshold);
+# the good measurement said "upright" and was overruled by the bad one.
+#
+# Requiring agreement costs the lying-along-the-view case that OR was added
+# for — that pose now falls back to the angle and height paths, which is
+# where it was before POSTURE_RATIO existed. Set POSTURE_REQUIRE_BOTH=0 to
+# restore OR once you have re-tuned the thresholds against the fixed
+# elevation values.
+POSTURE_REQUIRE_BOTH  = os.getenv("POSTURE_REQUIRE_BOTH", "1") == "1"
+
+
+def get_posture_ratios(kpts):
+    """Return (elevation, compactness), either may be None if unmeasurable.
+
+    Abstains rather than guessing: a missing ankle yields elevation=None and
+    the caller simply falls back to the existing angle/aspect paths.
+    """
+    elevation = compactness = None
+
+    sh_mid  = midpoint(kpts[LEFT_SHOULDER][:2], kpts[RIGHT_SHOULDER][:2])
+    hip_mid = midpoint(kpts[LEFT_HIP][:2],      kpts[RIGHT_HIP][:2])
+    # BUG FIX: this passed the y-difference as BOTH arguments —
+    #     math.hypot(sh_mid[1] - hip_mid[1], sh_mid[1] - hip_mid[1])
+    # so torso_len was sqrt(2) * |dy| instead of the real torso length. For a
+    # body lying across the view dy collapses toward zero while dx is the whole
+    # torso, so the denominator went to ~0 and `elevation` became meaningless.
+    # It is the value printed as `e=` on the overlay, and with POSTURE_RATIO=1
+    # it alone could force the FALLEN classification.
+    torso_len = math.hypot(sh_mid[0] - hip_mid[0], sh_mid[1] - hip_mid[1])
+
+    ankles = [kpts[i] for i in (LEFT_ANKLE, RIGHT_ANKLE)
+              if point_conf(kpts[i]) >= POSE_CONF_THRESHOLD]
+    if torso_len > 1e-3 and ankles:
+        # Lowest visible ankle is the best available floor contact point.
+        ankle_y = max(float(a[1]) for a in ankles)
+        elevation = (ankle_y - sh_mid[1]) / torso_len
+
+    shoulder_w = math.hypot(kpts[LEFT_SHOULDER][0] - kpts[RIGHT_SHOULDER][0],
+                            kpts[LEFT_SHOULDER][1] - kpts[RIGHT_SHOULDER][1])
+    visible = [k for k in kpts if point_conf(k) >= POSE_CONF_THRESHOLD]
+    if shoulder_w > 1e-3 and len(visible) >= 6:
+        xs = [float(k[0]) for k in visible]
+        ys = [float(k[1]) for k in visible]
+        extent = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+        compactness = extent / shoulder_w
+
+    return elevation, compactness
 
 # ── Keypoint temporal smoothing ───────────────────────────────────────────────
 # Per-track EMA smoothing eliminates the flicker caused by confidence
@@ -740,22 +1524,30 @@ def smooth_keypoints(kpt_smooth: dict, tid: int, raw_kpts) -> np.ndarray:
     return blended
 
 
-def draw_pose_overlay(frame, kpts):
+def draw_pose_overlay(frame, kpts, color=None):
+    """Skeleton overlay. `color` (BGR) ties the joints and bones to the track's
+    status so the skeleton, the box and the HUD all say the same thing; the
+    joints are drawn in a lightened version so they stay readable against the
+    bones. Passing None keeps the original cyan/yellow scheme."""
     skeleton = [
         (0,1),(0,2),(1,3),(2,4),(5,6),(5,7),(7,9),(6,8),
         (8,10),(5,11),(6,12),(11,12),(11,13),(13,15),(12,14),(14,16)
     ]
-    for kp in kpts:
-        if kp[2] > POSE_CONF_THRESHOLD:
-            cv2.circle(frame, (int(kp[0]), int(kp[1])), 4, (0, 255, 255), -1)
+    bone_c  = color if color is not None else (255, 255, 0)
+    joint_c = (tuple(min(255, int(c) + 60) for c in color)
+               if color is not None else (0, 255, 255))
     for a, b in skeleton:
         if kpts[a][2] > POSE_CONF_THRESHOLD and kpts[b][2] > POSE_CONF_THRESHOLD:
             cv2.line(
                 frame,
                 (int(kpts[a][0]), int(kpts[a][1])),
                 (int(kpts[b][0]), int(kpts[b][1])),
-                (255, 255, 0), 2
+                bone_c, 2
             )
+    # Joints last so they sit on top of the bones rather than under them.
+    for kp in kpts:
+        if kp[2] > POSE_CONF_THRESHOLD:
+            cv2.circle(frame, (int(kp[0]), int(kp[1])), 4, joint_c, -1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Module D — Body-Based Agitation Scorer
@@ -1230,26 +2022,60 @@ class FallStateMachine:
         # transition is pending. See _evaluate_alert for the firing logic.
         self._lying_confirm_since = None
         self._last_fall_label  = "FALL DETECTED (HIGH CONFIDENCE)"
-        self._angle_history    = deque(maxlen=60)   # (angle, timestamp) — ~10–20s at realistic 3–8 fps inference
+        # (angle, timestamp). Bounded by TIME, not frame count — see
+        # ANGLE_HISTORY_S for why the old maxlen=60 was a latent bug.
+        self._angle_history    = deque(maxlen=ANGLE_HISTORY_MAXLEN)
+        # (centre_y, bbox_h, timestamp) — parallel to _angle_history, so the
+        # fast-fall path can ask "did the body actually move while that angle
+        # was changing?". See FALL_MOTION_GATE.
+        self._motion_history   = deque(maxlen=ANGLE_HISTORY_MAXLEN)
         self._max_bbox_h       = 0  # largest bbox height seen for this track (standing reference)
+        self._seated_until     = 0.0  # sticky seated dwell, see SEATED_STICKY_S
+        self._seated_deep      = False  # knees deeply folded at last seated reading
+        self._pending_onset    = False  # promoted on vanish; run onset logic next tick
+        # First observation timestamp — used to refuse an instant EMERGENCY to
+        # a track that has existed for two frames. See UNWITNESSED_MIN_*.
+        self._first_seen       = None
+        self._frames_seen      = 0
+        # Set when the unwitnessed-fall path was deferred for want of track
+        # history; the confirm timer then fires it as a FALL, not a lie-down.
+        self._unwitnessed_pending = False
+        # Name of the furniture zone the person was last resting in, or None.
+        self._furniture = None
 
-    def update(self, angle, aspect_ratio, has_kpts, now, bbox_h=0):
+    def update(self, angle, aspect_ratio, has_kpts, now, bbox_h=0,
+               posture=(None, None), seated=False, seated_deep=False,
+               furniture=None, center_y=None, extent_ratio=None):
         """
         angle:        torso angle from vertical (degrees)
         aspect_ratio: bbox height / width
         has_kpts:     whether required keypoints are visible
         bbox_h:       bounding box height in pixels (used for height-ratio fall path)
+        posture:      (elevation, compactness) from get_posture_ratios(), only
+                      consulted when POSTURE_RATIO=1; defaults keep the old
+                      signature working for any other caller.
+        furniture:    name of the furniture zone supporting this person, or
+                      None. Defaults to None so any other caller is unaffected.
+        center_y:     bbox centre y in pixels, for the fast-fall displacement
+                      gate. None disables the gate for this track (fail open).
+        extent_ratio: body_extent_ratio() — bbox height in torso lengths.
+                      None means unmeasurable, and the Path B gate abstains.
         Returns (state_string, alert_type_or_None)
         """
+        self._furniture = furniture
+        if self._first_seen is None:
+            self._first_seen = now
+        self._frames_seen += 1
         if not has_kpts:
             self._candidate = self.NORMAL
             self._candidate_count = 0
             return self._state, None
 
-        # Maintain standing-height reference. Only update when the person
-        # appears upright (aspect_ratio > 1.5) so a fall frame doesn't corrupt
-        # the reference value we use to detect that same fall.
-        if bbox_h > 0 and aspect_ratio > 1.5:
+        # Maintain standing-height reference. Guard on current state (NORMAL)
+        # rather than aspect_ratio > 1.5 — overhead/diagonal CCTV cameras
+        # produce square bboxes even for standing people, so the old aspect
+        # guard meant _max_bbox_h was never set and Path B never fired.
+        if bbox_h > 0 and self._state == self.NORMAL:
             self._max_bbox_h = max(self._max_bbox_h, bbox_h)
 
         height_ratio = (bbox_h / self._max_bbox_h
@@ -1257,6 +2083,18 @@ class FallStateMachine:
 
         # Track angle over time — used to measure transition speed
         self._angle_history.append((angle, now))
+        # ...and the body's position/size alongside it, so the fast-fall path
+        # can check the angle change was accompanied by actual movement.
+        self._motion_history.append(
+            (center_y if center_y is not None else None, bbox_h, now))
+        # Prune by age so the window is a number of SECONDS on every host,
+        # regardless of inference rate. Always keep at least two samples so a
+        # rate can still be computed after a long detection gap.
+        horizon = now - ANGLE_HISTORY_S
+        while len(self._angle_history) > 2 and self._angle_history[0][1] < horizon:
+            self._angle_history.popleft()
+        while len(self._motion_history) > 2 and self._motion_history[0][2] < horizon:
+            self._motion_history.popleft()
 
         # Classify raw frame.
         # Path A: classic horizontal fall — wide bbox + large torso angle.
@@ -1272,13 +2110,81 @@ class FallStateMachine:
         #   aspect_ratio < 1.2 gate prevents perspective-driven bbox shrinkage
         #   (person walking away from camera gets smaller but stays upright)
         #   from triggering this path.
-        if (angle > FALL_ANGLE_THRESHOLD and aspect_ratio < 0.85) or \
-                (height_ratio < FALL_HEIGHT_RATIO_THRESHOLD and aspect_ratio < 1.2):
+        # Path C (POSTURE_RATIO=1): calibration-free body ratios. Unlike Path B
+        # this needs no standing reference, so it also catches someone already
+        # down when the stream starts. Both ratios must agree before it fires —
+        # either alone is too noisy to justify an EMERGENCY.
+        # OR, not AND: the two ratios cover each other's blind spot. Elevation
+        # catches a body lying across the view, where compactness stays high;
+        # compactness catches a body lying along the view, where elevation is
+        # fooled by projection. Requiring both would fire on neither.
+        path_c = False
+        if POSTURE_RATIO_ON:
+            elevation, compactness = posture
+            low_elev = elevation is not None and elevation < POSTURE_ELEVATION_MAX
+            low_comp = compactness is not None and compactness < POSTURE_COMPACT_MAX
+            if POSTURE_REQUIRE_BOTH:
+                # Both must be measurable AND both must agree. A single ratio
+                # is not enough evidence to declare a person on the floor.
+                path_c = (elevation is not None and compactness is not None
+                          and low_elev and low_comp)
+            else:
+                path_c = low_elev or low_comp
+
+        # Short dwell so an armchair briefly hiding a knee doesn't blink the
+        # guard off mid-sit; the override below stops it ever masking a fall.
+        if seated:
+            self._seated_until = now + SEATED_STICKY_S
+            self._seated_deep  = seated_deep
+        seated_now = seated or now < self._seated_until
+
+        # Floor-level override — but NOT while the knees are deeply folded.
+        # A low armchair seen from above puts a seated person's bbox under the
+        # threshold, and letting height win there disabled the guard on exactly
+        # the pose it exists for. You cannot lie flat with your knees at 60°,
+        # so deep flexion outranks bbox height.
+        if height_ratio < SEATED_OVERRIDE_HRATIO and not self._seated_deep:
+            seated_now = False
+            self._seated_until = 0.0
+
+        # The guard may PREVENT a fall, never UNDO one. Once FALLEN is
+        # established, a seated-looking reading (bent knees on the floor) must
+        # not reset the state — doing so cleared _lying_confirm_since and
+        # restarted the 3s confirmation on every brief re-detection, so it
+        # never completed. Recovery needs positive evidence of getting up,
+        # which the existing NORMAL classification below still provides.
+        # Furniture override — the actual "lying down means ON THE FLOOR" rule.
+        # A hip midpoint inside a sofa/bed/chair zone means the body is being
+        # held up by furniture, which no pose geometry can tell you. In "all"
+        # mode this outranks every fall path; in "slow" mode it only blocks
+        # the controlled-descent path, so a genuine collapse onto the bed
+        # still alerts. It never UNDOES an established FALLEN, for the same
+        # reason the seated guard doesn't: that reset the confirm timer every
+        # frame and the alert never completed.
+        # Path B, with both gates its comment always described:
+        #   * aspect below FALL_PATH_B_ASPECT_MAX (a taller-than-wide box is
+        #     an upright person, however small they look at range);
+        #   * the skeleton agreeing the body is compressed. `_max_bbox_h` is
+        #     range-blind, so height_ratio alone measures how far away the
+        #     person walked. body_extent_ratio() cancels range.
+        # extent_ratio None => unmeasurable => the gate abstains (fail open).
+        path_b = (height_ratio < FALL_HEIGHT_RATIO_THRESHOLD
+                  and aspect_ratio < FALL_PATH_B_ASPECT_MAX
+                  and (extent_ratio is None or extent_ratio < FALL_EXTENT_MAX))
+
+        on_furniture = furniture is not None
+        if on_furniture and FURNITURE_MODE == "all" and self._state != self.FALLEN:
+            raw = self.NORMAL
+        elif seated_now and self._state != self.FALLEN:
+            raw = self.NORMAL
+        elif (angle > FALL_ANGLE_THRESHOLD and aspect_ratio < 1.3) or \
+                path_b or path_c:
             raw = self.FALLEN
         elif angle > STUMBLE_ANGLE_THRESHOLD:
             raw = self.STUMBLE
         else:
             raw = self.NORMAL
+
 
         # Temporal smoothing
         if raw == self._candidate:
@@ -1303,6 +2209,7 @@ class FallStateMachine:
             self._fallen_since = self._fallen_since or now
         else:
             self._fallen_since = None
+            self._unwitnessed_pending = False
             # Person left FALLEN before the lying-confirm window elapsed —
             # this is exactly what the timer is for: their "fall" was
             # transient (a bend, a partial slump that recovered) and should
@@ -1311,6 +2218,139 @@ class FallStateMachine:
 
         alert = self._evaluate_alert(prev, self._state, now)
         return self._state, alert
+
+    def is_fallen(self):
+        return self._state == self.FALLEN
+
+    def promote_on_vanish(self, now):
+        """Commit a fall that was still being confirmed when the track died.
+
+        FALL_FRAMES_REQUIRED demands 3 consecutive FALLEN frames before the
+        state commits. A body on the floor is the hardest thing for the
+        detector to hold, so a real fall often supplies only one or two frames
+        before the track is lost — the candidate never commits, _state stays
+        NORMAL, and tick_absent() has nothing to continue. The fall then only
+        surfaces if the person MOVES later and detection returns, which is
+        precisely backwards for an unconscious resident.
+
+        A track that was upright, began registering FALLEN, and then vanished
+        is far more likely to be on the floor than to have left the room, so
+        the pending candidate is committed here and the lying-down
+        confirmation armed. Returns True if it promoted.
+        """
+        if self._state == self.FALLEN:
+            return False
+        if self._candidate != self.FALLEN or self._candidate_count < 1:
+            return False
+        # Last seen supported by furniture — the disappearance of someone
+        # sitting on a sofa is not evidence of a collapse, it is evidence the
+        # detector lost a stationary person. Promoting here manufactured falls
+        # out of every seated resident whose track lapsed.
+        if self._furniture is not None:
+            return False
+        self._state = self.FALLEN
+        self._fallen_since = now
+        # Do NOT assume this was a slow lie-down. Previously this armed the
+        # lying-confirm unconditionally, so every unseen fall — however violent
+        # — was reported as LYING DOWN. Defer to _evaluate_alert's normal
+        # onset logic, which reads the recorded angle history and decides fast
+        # fall vs slow descent on the evidence.
+        self._pending_onset = True
+        return True
+
+    def tick_absent(self, now):
+        """Advance timers for a track the detector can no longer see.
+
+        Only meaningful once the person has ALREADY been classified FALLEN —
+        we are continuing a conclusion that was reached while they were still
+        visible, not inventing one. State is deliberately left unchanged: with
+        no observation there is no evidence they got up, and assuming recovery
+        is the dangerous assumption.
+
+        Returns an alert string or None. Cooldowns inside _evaluate_alert stop
+        this from re-firing every frame.
+        """
+        if not (self._state == self.FALLEN and self._fallen_since is not None):
+            return None
+        # Must have actually held FALLEN, not flickered through it.
+        if now - self._fallen_since < PERSIST_MIN_FALLEN_S:
+            return None
+        # First tick after a promotion runs the ONSET branch, so the fast/slow
+        # decision is made from the real angle history rather than defaulting
+        # to a lie-down. A violent fall that vanished mid-descent still reports
+        # as FALL DETECTED.
+        if getattr(self, "_pending_onset", False):
+            self._pending_onset = False
+            return self._evaluate_alert(self.NORMAL, self.FALLEN, now)
+        return self._evaluate_alert(self.FALLEN, self.FALLEN, now)
+
+    def vanished_mid_frame(self, frame_w, frame_h, margin=PERSIST_EDGE_MARGIN):
+        """True if the last known box was clear of the frame border.
+
+        Someone who disappears at the edge most likely walked out; someone who
+        disappears mid-room did not, and that is the case worth holding on to.
+        """
+        b = getattr(self, "last_box", None)
+        if b is None:
+            return True          # unknown — err toward keeping them
+        x1, y1, x2, y2 = b
+        return not (x1 <= margin or y1 <= margin
+                    or x2 >= frame_w - margin or y2 >= frame_h - margin)
+
+    def _track_age(self, now):
+        return 0.0 if self._first_seen is None else max(0.0, now - self._first_seen)
+
+    def _has_enough_history(self, now):
+        """True if this track is old enough for 'never seen upright' to mean
+        anything. A newborn track has no history because it is newborn, not
+        because the person was already down."""
+        return (self._track_age(now) >= UNWITNESSED_MIN_AGE_S
+                and self._frames_seen >= UNWITNESSED_MIN_FRAMES)
+
+    def adopt_from(self, other):
+        """Take over another track's identity after a tracker ID switch.
+
+        Carries the evidence that makes the fall logic correct — angle history
+        (so `_never_seen_upright` is not fooled), the standing-height
+        reference (so Path B doesn't recalibrate against a fallen bbox), the
+        alert cooldowns (so the same event cannot re-fire under a new id) and
+        the committed state itself.
+
+        Deliberately NOT carried: nothing. The whole point is that this is the
+        same person, so the new id should be indistinguishable from the old.
+        """
+        self._state               = other._state
+        self._candidate           = other._candidate
+        self._candidate_count     = other._candidate_count
+        self._last_fall_alert_time  = other._last_fall_alert_time
+        self._last_lying_alert_time = other._last_lying_alert_time
+        self._fallen_since        = other._fallen_since
+        self._lying_confirm_since = other._lying_confirm_since
+        self._last_fall_label     = other._last_fall_label
+        self._angle_history       = other._angle_history
+        self._motion_history      = other._motion_history
+        self._max_bbox_h          = other._max_bbox_h
+        self._seated_until        = other._seated_until
+        self._seated_deep         = other._seated_deep
+        self._pending_onset       = other._pending_onset
+        self._first_seen          = other._first_seen
+        self._frames_seen         = other._frames_seen
+        self._unwitnessed_pending = other._unwitnessed_pending
+        self._furniture           = other._furniture
+        if getattr(other, "last_box", None) is not None:
+            self.last_box = other.last_box
+
+    def _never_seen_upright(self):
+        """True if this track has no record of the person standing.
+
+        The angle history starts when the track is created. If its minimum
+        torso angle is already past UPRIGHT_ANGLE_MAX, the track began with
+        the person part-way down or already on the floor — so there is no
+        descent to measure and a low rate means nothing.
+        """
+        if not self._angle_history:
+            return True
+        return min(a for a, _ in self._angle_history) > UPRIGHT_ANGLE_MAX
 
     def _get_angle_rate(self, now, window_s=FALL_RATE_WINDOW_S):
         """
@@ -1338,6 +2378,52 @@ class FallStateMachine:
         dt = max(times[-1] - times[min_idx], 0.001)
         return max(0.0, (angles[-1] - angles[min_idx]) / dt)
 
+    def _body_actually_moved(self, now, window_s=FALL_RATE_WINDOW_S):
+        """Did the body move, over the window the angle rate was measured on?
+
+        Returns (moved, reason). `moved` is True when the evidence supports a
+        real fall OR when there is not enough evidence to judge — abstaining
+        must never suppress an emergency, so the only False is a positive
+        reading of "the body held still while the estimate jumped".
+
+        Both measures are divided by the person's own standing bbox height, so
+        the thresholds carry across cameras and distances with no calibration.
+        """
+        if not FALL_MOTION_GATE_ON:
+            return True, "gate off"
+        scale = self._max_bbox_h
+        if scale <= 30:
+            return True, "no standing reference"
+
+        cutoff = now - window_s
+        recent = [(cy, bh, t) for cy, bh, t in self._motion_history if t >= cutoff]
+        if len(recent) < 2:
+            return True, "too few samples"
+
+        # Anchor on the same frame _get_angle_rate anchors on: the minimum
+        # angle in the window, i.e. the most upright the person was seen.
+        angles = [(a, t) for a, t in self._angle_history if t >= cutoff]
+        if len(angles) < 2:
+            return True, "too few angle samples"
+        anchor_t = min(angles, key=lambda at: at[0])[1]
+        before = [m for m in recent if m[2] <= anchor_t] or [recent[0]]
+        start, end = before[-1], recent[-1]
+
+        descent = None
+        if start[0] is not None and end[0] is not None:
+            descent = (end[0] - start[0]) / scale        # +ve = moved down
+        drop = (start[1] - end[1]) / scale if (start[1] and end[1]) else None
+
+        if descent is None and drop is None:
+            return True, "nothing measurable"
+        if (descent is not None and descent >= FALL_MIN_DESCENT) or \
+           (drop is not None and drop >= FALL_MIN_HEIGHT_DROP):
+            return True, (f"descent {descent if descent is None else round(descent, 2)}, "
+                          f"height drop {drop if drop is None else round(drop, 2)}")
+        return False, (f"descent {descent if descent is None else round(descent, 2)}, "
+                       f"height drop {drop if drop is None else round(drop, 2)} "
+                       f"— body did not move")
+
     def _evaluate_alert(self, prev, curr, now):
         alert = None
 
@@ -1347,6 +2433,17 @@ class FallStateMachine:
             # Anchored on min angle in the window — see _get_angle_rate docstring
             # for why (latest − earliest) was unreliable at low inference fps.
             angle_rate = self._get_angle_rate(now)
+            moved, why_moved = self._body_actually_moved(now)
+            if FALL_MOTION_DEBUG:
+                print(f"[FALL SM] motion gate: rate {angle_rate:.1f}deg/s, "
+                      f"moved={moved} ({why_moved})")
+            # A high rate with no displacement is the pose estimate jumping,
+            # not a person falling. Demote it to the confirm path rather than
+            # firing an EMERGENCY — if they really are down, the 3s window
+            # still produces an alert.
+            if angle_rate >= FALL_RATE_THRESHOLD and not moved:
+                angle_rate = 0.0
+                print(f"[FALL SM] ⚖ apparent fast transition rejected: {why_moved}")
 
             if angle_rate >= FALL_RATE_THRESHOLD:
                 # Fast uncontrolled transition → genuine fall.
@@ -1361,6 +2458,52 @@ class FallStateMachine:
                         print(f"[FALL SM] ⚡ Fast transition ({angle_rate:.1f}°/s) → genuine fall")
                 # Cancel any pending lying-confirm — we're past it now.
                 self._lying_confirm_since = None
+            elif self._furniture is not None:
+                # Slow descent onto known furniture. In "all" mode we never got
+                # here (raw was forced NORMAL); this is the "slow" mode path.
+                # Lying on a sofa is not lying on the floor — no alert.
+                #
+                # Checked BEFORE the unwitnessed branch on purpose: a resident
+                # who was already settled on the sofa when the stream started
+                # has no upright history either, and without this ordering the
+                # unwitnessed path would call that a fall.
+                self._lying_confirm_since = None
+                self._unwitnessed_pending = False
+                self._last_fall_label = f"ON {self._furniture.upper()}"
+                if FURNITURE_DEBUG:
+                    print(f"[FALL SM] 🛋 slow descent inside zone "
+                          f"'{self._furniture}' — not a floor event, suppressed")
+            elif self._never_seen_upright():
+                # We never observed this person standing, so a "slow" rate is
+                # an artefact of missing history, not evidence of a controlled
+                # descent — the fall happened while the detector had lost them.
+                # Someone deliberately lying down is normally tracked doing it;
+                # appearing already on the floor after an absence is far more
+                # consistent with a fall, so it is treated as one.
+                #
+                # ...UNLESS the track is newborn. A track two frames old also
+                # has "no upright history", and that is what an ID switch looks
+                # like. Defer instead of discarding: arm the confirm timer and
+                # let it fire the same EMERGENCY a few seconds later, once the
+                # body has actually stayed down. See UNWITNESSED_MIN_*.
+                if self._has_enough_history(now):
+                    if now - self._last_fall_alert_time >= FALL_ALERT_COOLDOWN_S:
+                        alert = "FALL DETECTED (UNWITNESSED)"
+                        self._last_fall_alert_time = now
+                        self._last_fall_label = alert
+                        print(f"[FALL SM] ⚡ no upright history — descent was not "
+                              f"observed, reporting as fall")
+                    self._lying_confirm_since = None
+                    self._unwitnessed_pending = False
+                else:
+                    self._unwitnessed_pending = True
+                    self._lying_confirm_since = now
+                    self._last_fall_label = "FALL? (CONFIRMING)"
+                    if VERBOSE_LOGS:
+                        print(f"[FALL SM] ⏳ no upright history but track is only "
+                              f"{self._track_age(now):.1f}s / {self._frames_seen} "
+                              f"frames old — confirming over "
+                              f"{LYING_CONFIRM_SECONDS:.1f}s before alerting")
             else:
                 # Slow/controlled → potential intentional lie-down.
                 # Do NOT alert yet. Arm the confirmation timer; the alert only
@@ -1387,9 +2530,46 @@ class FallStateMachine:
             # ── Lying-down confirmation ────────────────────────────────────
             # If the slow-transition path armed the timer and the person has
             # now been continuously fallen for LYING_CONFIRM_SECONDS, fire.
+            # A deferred unwitnessed fall does not need the full lying-confirm
+            # window — it only needed the track to grow old enough to be
+            # trusted. Waiting the extra time was measured costing 3.0s on a
+            # real fall (33.75s vs 30.75s on fall1_slow.mp4) for no added
+            # evidence. Fire as soon as the age/frame bar is met.
+            if (self._unwitnessed_pending and self._lying_confirm_since is not None
+                    and self._furniture is None and self._has_enough_history(now)):
+                if now - self._last_fall_alert_time >= FALL_ALERT_COOLDOWN_S:
+                    alert = "FALL DETECTED (UNWITNESSED)"
+                    self._last_fall_alert_time = now
+                    self._last_fall_label = alert
+                    print(f"[FALL SM] ⚡ unwitnessed fall confirmed "
+                          f"(track now {self._track_age(now):.1f}s / "
+                          f"{self._frames_seen} frames) → alert sent")
+                self._unwitnessed_pending = False
+                self._lying_confirm_since = None
+
             if self._lying_confirm_since is not None:
                 if now - self._lying_confirm_since >= LYING_CONFIRM_SECONDS:
-                    if now - self._last_lying_alert_time >= FALL_ALERT_COOLDOWN_S:
+                    if self._furniture is not None:
+                        # They settled onto furniture, not the floor. Nothing
+                        # to report; drop the pending fall too, because a body
+                        # resting on a sofa is not an unwitnessed collapse.
+                        self._last_fall_label = f"ON {self._furniture.upper()}"
+                        self._unwitnessed_pending = False
+                        if FURNITURE_DEBUG:
+                            print(f"[FALL SM] 🛋 confirm window elapsed inside "
+                                  f"zone '{self._furniture}' — suppressed")
+                    elif self._unwitnessed_pending:   # (see the early-fire below)
+                        # Deferred unwitnessed fall, now sustained. Same
+                        # EMERGENCY severity as the immediate path — the gate
+                        # only bought evidence, it did not downgrade anything.
+                        if now - self._last_fall_alert_time >= FALL_ALERT_COOLDOWN_S:
+                            alert = "FALL DETECTED (UNWITNESSED)"
+                            self._last_fall_alert_time = now
+                            self._last_fall_label = alert
+                            print(f"[FALL SM] ⚡ unwitnessed fall confirmed "
+                                  f"({LYING_CONFIRM_SECONDS:.1f}s sustained) → alert sent")
+                        self._unwitnessed_pending = False
+                    elif now - self._last_lying_alert_time >= FALL_ALERT_COOLDOWN_S:
                         alert = "LYING DOWN DETECTED"
                         self._last_lying_alert_time = now
                         self._last_fall_label = "LYING DOWN"
@@ -1402,7 +2582,7 @@ class FallStateMachine:
             # Independent of the lying-confirm path: triggers for any fall
             # (fast or slow) that has persisted >30s. Guard against firing
             # twice on the same frame as the lying-confirm above.
-            if alert is None:
+            if alert is None and self._furniture is None:
                 elapsed = now - self._fallen_since
                 if elapsed > 30 and now - self._last_fall_alert_time >= 60:
                     alert = f"PROLONGED FALL ({int(elapsed)}s)"
@@ -1414,7 +2594,40 @@ class FallStateMachine:
 # ─────────────────────────────────────────────────────────────────────────────
 # Alert Emitter
 # ─────────────────────────────────────────────────────────────────────────────
-def send_alert(cam_id, alert_type, message, detection=None):
+# ── Camera-level duplicate suppression for fall-family alerts ────────────────
+# Per camera: the recent fall alerts and where they happened. Re-association
+# should already have prevented most duplicates by keeping one person on one
+# id; this catches the rest — a track that dies and reappears outside the
+# re-association window, or two overlapping detections of one body.
+_FALL_ALERT_RANK = {"lying_down": 1, "fall_detected": 2, "prolonged_fall": 3}
+_fall_dedup      = {}    # cam_id -> [ {ts, box, rank} ]
+_fall_dedup_lock = threading.Lock()
+
+
+def _fall_alert_is_duplicate(cam_id, detection, box, now):
+    """True if this fall-family alert repeats a recent one in the same place.
+
+    Escalation always passes: a higher-ranked classification (lying → fall →
+    prolonged) is new information about the same body and must reach the
+    nurse. Only a same-or-lower rank inside the window is dropped.
+    """
+    rank = _FALL_ALERT_RANK.get(detection or "", 0)
+    if not FALL_DEDUP_ON or rank == 0 or box is None:
+        return False
+    with _fall_dedup_lock:
+        recent = [e for e in _fall_dedup.get(cam_id, ())
+                  if now - e["ts"] <= FALL_DEDUP_S]
+        for e in recent:
+            if _iou(box, e["box"]) >= FALL_DEDUP_MIN_IOU and rank <= e["rank"]:
+                _fall_dedup[cam_id] = recent
+                return True
+        recent.append({"ts": now, "box": tuple(box), "rank": rank})
+        _fall_dedup[cam_id] = recent
+    return False
+
+
+def send_alert(cam_id, alert_type, message, detection=None, track_id=None,
+               box=None):
     """Emit alert via Socket.IO to the Node.js backend, and (subject to a
     per-camera cooldown) spawn a background worker that saves a pre/post-roll
     clip to disk and stamps the clipPath onto the persisted Incident.
@@ -1425,6 +2638,13 @@ def send_alert(cam_id, alert_type, message, detection=None):
     only the first one within a CLIP_COOLDOWN_S window writes a video.
     """
     now = time.time()
+
+    # Drop a fall/lying alert that repeats one already raised for the same
+    # place moments ago. Checked before the emit, so the duplicate never
+    # reaches the dashboard, the incident list, or the clip recorder.
+    if _fall_alert_is_duplicate(cam_id, detection, box, now):
+        print(f"[DEDUP] [{cam_id}] suppressed duplicate {detection}: {message}")
+        return
 
     # alertKey lets the backend match the deferred `cctv_alert_clip` payload
     # to the Incident document this alert created. We hand the same key to
@@ -1443,23 +2663,64 @@ def send_alert(cam_id, alert_type, message, detection=None):
         sio.emit("cctv_alert", payload)
     print(f"[ALERT] [{cam_id}] {alert_type}: {message}")
 
-    # Cooldown: skip clip recording if we're still in the post-roll window of
-    # a previous alert on this camera.
-    if now < _clip_cooldown_until.get(cam_id, 0.0):
-        return
-    _clip_cooldown_until[cam_id] = now + CLIP_POSTROLL_S + CLIP_COOLDOWN_S
 
-    # Deterministic filename: <cam>_<detection>_<YYYYMMDD_HHMMSS>_<key>.mp4
-    safe_cam   = cam_id.replace(" ", "_").replace("/", "_").replace("\\", "_")
-    safe_type  = (detection or alert_type).lower().replace(" ", "_").replace("/", "_")
-    ts_str     = datetime.now().strftime("%Y%m%d_%H%M%S")
-    key_short  = alert_key.split("|")[-1][-6:]   # last 6 digits of ms-epoch
-    clip_name  = f"{safe_cam}_{safe_type}_{ts_str}_{key_short}.mp4"
-    clip_path  = CLIP_DIR / clip_name
+    safe_type = (detection or alert_type).lower().replace(" ", "_").replace("/", "_")
+
+    # Incidents are per PERSON, not per camera. Two residents can be in one
+    # frame with unrelated events; merging them lost one of the clips entirely.
+    clip_key = _canonical_clip_key(cam_id, track_id)
+
+    # If this person already has an incident recording, fold the alert into it:
+    # push the deadline out and promote the label if this is worse. That makes
+    # one person's lying-down that escalates save as a single prolonged_fall
+    # clip, without touching anyone else's incident.
+    with _clip_incident_lock:
+        inc = _clip_incidents.get(clip_key)
+        if inc is not None and not inc["done"]:
+            r = _clip_label_rank(safe_type)
+            if r > inc["rank"]:
+                print(f"[CLIP] {cam_id}: ID {track_id} incident escalating "
+                      f"{inc['label']} -> {safe_type}")
+                inc["label"], inc["rank"] = safe_type, r
+            inc["end_at"] = min(now + CLIP_POSTROLL_S,
+                                inc["opened"] + CLIP_INCIDENT_MAX_S)
+            return
+
+    # Cooldown: don't reopen an incident for the SAME person immediately after
+    # one closed. Per-person, so a second resident is never gagged by the first.
+    if now < _clip_cooldown_until.get(clip_key, 0.0):
+        return
+    _clip_cooldown_until[clip_key] = now + CLIP_POSTROLL_S + CLIP_COOLDOWN_S
+
+    # Concurrency cap. The alert has already been sent above — only the video
+    # is skipped, so nothing is silenced, we just stop stacking encoders.
+    with _clip_incident_lock:
+        live = sum(1 for (c, _), i in _clip_incidents.items()
+                   if c == cam_id and not i["done"])
+    if live >= CLIP_MAX_CONCURRENT:
+        print(f"[CLIP] {cam_id}: {live} recordings already open, skipping clip "
+              f"for ID {track_id} ({safe_type}) — alert still sent")
+        return
+
+    # Deterministic filename: <cam>_<label>_<YYYYMMDD_HHMMSS>_<key>.mp4
+    # The label is provisional until the incident closes.
+    inc = {
+        "cam":    cam_id.replace(" ", "_").replace("/", "_").replace("\\", "_"),
+        "label":  safe_type,
+        "rank":   _clip_label_rank(safe_type),
+        "ts":     datetime.now().strftime("%Y%m%d_%H%M%S"),
+        "key":    alert_key.split("|")[-1][-6:],   # last 6 digits of ms-epoch
+        "opened": now,
+        "end_at": now + CLIP_POSTROLL_S,
+        "done":   False,
+        "payload": payload,
+    }
+    with _clip_incident_lock:
+        _clip_incidents[clip_key] = inc
 
     t = threading.Thread(
         target=_record_alert_clip,
-        args=(cam_id, clip_path, payload),
+        args=(cam_id, clip_key, inc),
         daemon=True,
     )
     t.start()
@@ -1491,9 +2752,23 @@ def capture_thread(cam_id, source):
             # browser feed alive during testing and lets time-based detectors
             # (inactivity, pacing) accumulate state across the full clip.
             if _is_file_source:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                print(f"[CAPTURE {cam_id}] Video file ended — looping.")
-                continue
+                print(f"[CAPTURE {cam_id}] Video file ended — sending blank frames to clear detections...")
+                # Pump a BLACK frame (not the last real frame) so YOLO sees no
+                # people and cannot fire false alerts on a frozen static image.
+                # Tracks are GC'd after TRACK_TIMEOUT_S (5s) and all state
+                # machines reset cleanly. Browser shows a black "VIDEO ENDED" screen.
+                _blank = np.zeros((INFERENCE_H, INFERENCE_W, 3), dtype=np.uint8)
+                cv2.putText(_blank, "VIDEO ENDED", (INFERENCE_W // 2 - 120, INFERENCE_H // 2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (60, 60, 60), 2)
+                cv2.putText(_blank, "Press Ctrl+C to stop", (INFERENCE_W // 2 - 140, INFERENCE_H // 2 + 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (40, 40, 40), 1)
+                _end_at = time.time() + 10
+                while time.time() < _end_at and not _shutting_down:
+                    with raw_lock:
+                        raw_frames[cam_id] = (_blank, time.time())
+                    time.sleep(0.1)
+                print(f"[CAPTURE {cam_id}] Video finished. Press Ctrl+C to stop.")
+                break
             _fail_count += 1
             time.sleep(1)
             # After repeated failures on an RTSP source, try to find the camera
@@ -1535,42 +2810,160 @@ def capture_thread(cam_id, source):
 # ─────────────────────────────────────────────────────────────────────────────
 TRACK_TIMEOUT_S = 5.0   # drop a track's per-person state after this much absence
 
+
+def reassociate_tracks(cam_id, boxes_by_tid, fall_machines, last_seen,
+                       carry_dicts, now):
+    """Re-link tracker IDs that were renamed mid-incident.
+
+    boxes_by_tid : {new_tid: (x1, y1, x2, y2)} for every track seen THIS frame
+    fall_machines: {tid: FallStateMachine} — read and rewritten in place
+    last_seen    : {tid: timestamp} — read and rewritten in place
+    carry_dicts  : other per-track dicts to move across, in place
+
+    A brand-new id that lands on the box an id vacated moments ago is the same
+    body: ByteTrack drops a track when the silhouette changes shape, which is
+    exactly what falling does. Matching is spatial only — IoU against the last
+    known box, inside REASSOC_MAX_GAP_S. This never invents a track; if nothing
+    overlaps, the new id proceeds as a genuinely new person.
+
+    Returns the list of (old_tid, new_tid, iou) it applied.
+    """
+    if not REASSOC_ON or not boxes_by_tid:
+        return []
+
+    seen_now = set(boxes_by_tid)
+    claimed  = set()
+    plan     = []
+    for new_tid, nb in boxes_by_tid.items():
+        if new_tid in last_seen:
+            continue                       # already an established track
+        best, best_iou = None, 0.0
+        for old_tid, sm in fall_machines.items():
+            if old_tid in seen_now or old_tid in claimed:
+                continue                   # still visible = a different person
+            gap = now - last_seen.get(old_tid, 0.0)
+            if gap <= 0.0 or gap > REASSOC_MAX_GAP_S:
+                continue
+            score = _iou(nb, getattr(sm, "last_box", None))
+            if score > best_iou:
+                best, best_iou = old_tid, score
+        if best is not None and best_iou >= REASSOC_MIN_IOU:
+            claimed.add(best)
+            plan.append((best, new_tid, best_iou))
+
+    for old_tid, new_tid, score in plan:
+        old_sm = fall_machines.pop(old_tid, None)
+        new_sm = FallStateMachine()
+        if old_sm is not None:
+            new_sm.adopt_from(old_sm)
+        fall_machines[new_tid] = new_sm
+        # Carry the behavioural detectors too. Their rolling windows are what
+        # make pacing and inactivity mean anything, and resetting them on every
+        # ID switch is how a wandering resident kept escaping the pacing check.
+        for d in carry_dicts:
+            if old_tid in d:
+                d[new_tid] = d.pop(old_tid)
+        last_seen.pop(old_tid, None)
+        # Keep writing into the incident/clip the old id opened.
+        alias_clip_track(cam_id, old_tid, new_tid)
+        if REASSOC_DEBUG or VERBOSE_LOGS:
+            print(f"[REASSOC {cam_id}] ID {old_tid} → {new_tid} "
+                  f"(IoU {score:.2f}) — same person, state carried over")
+    return plan
+
 # Status string → display color
 # DEPRESSION_RISK and MIXED_RISK previously lived here; the depression
 # sub-score was removed from BehaviorScorer (see its docstring) and
 # nothing ever set MIXED_RISK as a worst_status, so both were dropped.
-STATUS_COLORS = {
-    "NORMAL":   (0, 200, 0),
-    "STANDING": (0, 200, 0),
-    "SITTING":  (0, 165, 255),
-    "STUMBLE DETECTED":     (0, 165, 255),
-    "FALL DETECTED (HIGH CONFIDENCE)":   (0, 0, 255),
-    "FALL DETECTED (MEDIUM CONFIDENCE)": (0, 0, 255),
-    "PROLONGED FALL":       (0, 0, 200),
-    "AGITATION_RISK":       (0, 60, 200),
-    "PACING DETECTED":      (200, 100, 0),
-}
+# ─────────────────────────────────────────────────────────────────────────────
+# Status styling — ONE table for severity and colour
+# ─────────────────────────────────────────────────────────────────────────────
+# There used to be two dicts, both keyed on exact strings, and the labels the
+# state machine actually emits had drifted away from those keys. Every unlisted
+# label silently fell back to priority 1 (identical to NORMAL) and colour
+# (200,200,200) (white). Observed consequences, all visible on the Test_Falls_5
+# frames:
+#
+#   "LYING DOWN (CONFIRMING)"   -> priority 1  => the HUD read "WORST: NORMAL"
+#                                                in GREEN while the box was red
+#   "LYING DOWN"                -> no colour   => HUD text white, box red
+#   "FALL DETECTED (UNWITNESSED)" -> priority 1 => a real emergency ranked as
+#                                                NORMAL in the aggregator
+#   "PROLONGED FALL (37s)"      -> no match    => the dict key is "PROLONGED
+#                                                FALL", the label carries the
+#                                                seconds, so it never matched
+#
+# So this is not only cosmetic: _priority() decides which person's status the
+# camera-level HUD reports, and an emergency scoring 1 could be masked by any
+# other track. Matching is now by PREFIX, longest-specific first, so label
+# variants ("... (HIGH CONFIDENCE)", "(37s)", "— POSTURE") are covered by
+# construction instead of needing a new dict key each time.
+#
+# Colour language, BGR:
+#   green  = fine        amber  = pending confirmation
+#   orange = warning     red    = emergency        dark red = escalated
+STATUS_STYLES = [
+    # (label prefix,               priority, BGR colour)
+    ("PROLONGED FALL",                  10, (0,   0, 160)),
+    ("FALL DETECTED",                    9, (0,   0, 255)),
+    ("FALLEN (UNSEEN)",                  9, (0,   0, 255)),
+    ("FALL? (CONFIRMING)",               8, (0, 120, 255)),
+    ("INACTIVE",                         7, (0,  40, 220)),
+    ("LYING DOWN (CONFIRMING)",          5, (0, 200, 255)),
+    ("LYING DOWN",                       6, (0, 140, 255)),
+    ("STUMBLE DETECTED",                 4, (0, 165, 255)),
+    ("AGITATION_RISK",                   3, (0,  60, 200)),
+    ("PACING DETECTED",                  2, (200, 100, 0)),
+    # Benign, but worth showing as distinct from plain NORMAL: the person is
+    # accounted for and resting on furniture, not unmonitored.
+    ("ON ",                              1, (180, 150,  70)),
+    ("SITTING",                          1, (180, 150,  70)),
+    ("NORMAL",                           1, (0,  200,   0)),
+    ("STANDING",                         1, (0,  200,   0)),
+    ("NO PERSON",                        0, (150, 150, 150)),
+]
+# Sorted so a longer, more specific prefix always wins over a shorter one that
+# is also a prefix of it — "LYING DOWN (CONFIRMING)" must not match
+# "LYING DOWN". Done here rather than relying on the literal order above, so
+# adding an entry cannot silently break the precedence.
+STATUS_STYLES.sort(key=lambda e: -len(e[0]))
 
-# Worst-status priority for camera-level HUD aggregation across multiple tracks.
-# Higher number = more severe; the HUD shows the worst across all visible people.
-STATUS_PRIORITY = {
-    "NO PERSON": 0,
-    "NORMAL":    1,
-    "PACING DETECTED": 2,
-    "AGITATION_RISK": 3,
-    "STUMBLE DETECTED": 4,
-    "LYING DOWN": 5,
-    "FALL DETECTED (MEDIUM CONFIDENCE)": 6,
-    "FALL DETECTED (HIGH CONFIDENCE)":   7,
-    "PROLONGED FALL": 8,
-}
+# Fallback for a label nobody registered. Amber, priority 4: visible as
+# "something is being reported" rather than disappearing into NORMAL green.
+STATUS_STYLE_DEFAULT = (4, (0, 200, 255))
+
+
+def status_style(status):
+    """(priority, BGR) for a status label. Prefix match, most specific first."""
+    if status:
+        for prefix, prio, color in STATUS_STYLES:
+            if status.startswith(prefix):
+                return prio, color
+    return STATUS_STYLE_DEFAULT
+
 
 def _priority(status):
-    # Inactivity variants ("INACTIVE", "INACTIVE — POSTURE") share priority
-    # by prefix so the HUD aggregator handles them uniformly.
-    if status.startswith("INACTIVE"):
-        return 6
-    return STATUS_PRIORITY.get(status, 1)
+    return status_style(status)[0]
+
+
+def status_color(status):
+    return status_style(status)[1]
+
+
+# Kept for any external reader; derived so it cannot drift from the table.
+STATUS_COLORS = {prefix: color for prefix, _p, color in STATUS_STYLES}
+
+
+def draw_status_bar(frame, cam_id, text, color, clock=None):
+    """The black HUD band across the top. Shared by the live stream and the
+    saved clip so both are laid out identically and only the colour differs."""
+    h, w = frame.shape[:2]
+    cv2.rectangle(frame, (0, 0), (w, 40), (0, 0, 0), -1)
+    cv2.putText(frame, f"[{cam_id}] {text}", (10, 28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    if clock:
+        cv2.putText(frame, clock, (max(10, w - 80), 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
 
 def process_camera_thread(cam_id):
@@ -1628,8 +3021,8 @@ def process_camera_thread(cam_id):
         # noticeably better identity preservation when residents cross paths
         # in common areas. We use track_model (per-thread) so cameras don't
         # share tracker state.
-        results = track_model.track(frame, conf=0.4, iou=0.5, persist=True,
-                                    tracker="bytetrack.yaml", verbose=False)
+        results = track_model.track(frame, conf=DET_CONF, iou=0.5, persist=True,
+                                    tracker=TRACKER_CFG, verbose=False)
         display = frame.copy()
 
         # ── Collect every (track_id, kpts, box) the tracker returned ──────
@@ -1647,6 +3040,16 @@ def process_camera_thread(cam_id):
                 # Apply EMA smoothing before any drawing or detection logic.
                 # smooth_keypoints() updates kpt_smooth[tid] in place and returns
                 # the blended (17,3) array; raw_kpts is never modified.
+                # DET_CONF=0.10 is deliberately permissive so a body on the
+                # floor still registers, but it also lets junk through — a
+                # box on an empty desk counted as a person and sat still long
+                # enough to trigger inactivity. A real detection has a
+                # skeleton; a hallucinated box does not. Judge on the RAW
+                # keypoints: the EMA smoother carries confidence forward, so
+                # a ghost inherits plausibility from earlier frames.
+                if (int(np.sum(raw_kpts[:, 2] >= POSE_CONF_THRESHOLD))
+                        < MIN_CONFIDENT_KPTS):
+                    continue
                 kpts = smooth_keypoints(kpt_smooth, int(ids[i]), raw_kpts)
                 observations.append({
                     "tid":  int(ids[i]),
@@ -1654,6 +3057,22 @@ def process_camera_thread(cam_id):
                     "box":  box,
                     "conf": float(box.conf[0]),
                 })
+
+        # ── Re-associate switched track IDs ───────────────────────────────
+        # Runs BEFORE any state is created for this frame, so a renamed person
+        # inherits their history instead of starting from nothing.
+        reassociate_tracks(
+            cam_id,
+            {o["tid"]: tuple(map(int, o["box"].xyxy[0])) for o in observations},
+            fall_machines, last_seen,
+            (body_agi_scorers, pacing_detectors, movement_trackers,
+             last_behavior_per, last_pacing_per, last_movement_per, kpt_smooth),
+            now,
+        )
+
+        # Faint outline of any configured furniture so operators can see what
+        # the suppression mask actually covers.
+        draw_furniture_zones(display, cam_id)
 
         # ── HUD aggregator: worst status across all visible tracks ────────
         worst_status = "NO PERSON" if not observations else "NORMAL"
@@ -1674,12 +3093,10 @@ def process_camera_thread(cam_id):
 
             x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-            # Default green box + skeleton overlay per track
-            cv2.rectangle(display, (x1, y1), (x2, y2), (0, 200, 0), 2)
-            cv2.putText(display, f"ID {tid}", (x1, y2 + 18),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 220, 0), 1)
-            draw_pose_overlay(display, kpts)
-
+            # NOTE: the box, the ID text and the skeleton are drawn at the END
+            # of this block, once track_status is final. They used to be drawn
+            # here in a fixed green and then partly repainted, which is why the
+            # skeleton stayed cyan/yellow no matter what the box said.
             has_kpts  = pose_has_required_keypoints(kpts)
             angle     = get_torso_angle(kpts) if has_kpts else 0.0
             aspect    = get_body_aspect_ratio((x1, y1, x2, y2))
@@ -1694,13 +3111,65 @@ def process_camera_thread(cam_id):
             center_px = ((x1 + x2) / 2, (y1 + y2) / 2)
 
             # ── Module C: Fall ────────────────────────────────────────────
-            fall_status, fall_alert = fall_sm.update(angle, aspect, has_kpts, now, bbox_h=(y2 - y1))
+            posture = get_posture_ratios(kpts) if POSTURE_RATIO_ON else (None, None)
+
+            if POSTURE_RATIO_ON:
+                _ev, _cp = posture
+                _txt = (f"e={_ev:.2f}" if _ev is not None else "e=--") + \
+                       (f" c={_cp:.2f}" if _cp is not None else " c=--")
+                # Amber once either ratio crosses its threshold, so the frame
+                # where Path C starts firing is visible without reading logs.
+                _hot = ((_ev is not None and _ev < POSTURE_ELEVATION_MAX) or
+                        (_cp is not None and _cp < POSTURE_COMPACT_MAX))
+                cv2.putText(display, _txt, (x1, y2 + 34),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                            (0, 165, 255) if _hot else (200, 200, 60), 1)
+            _seated, _seated_deep = (looks_seated(kpts, angle) if has_kpts
+                                     else (False, False))
+            if _seated:
+                _kl, _kr = knee_flexion(kpts)
+                _kt = ((f"L{_kl:.0f}" if _kl is not None else "L--") + "/" +
+                       (f"R{_kr:.0f}" if _kr is not None else "R--"))
+                cv2.putText(display, f"seated {_kt}", (x1, y1 - 8),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (120, 200, 255), 1)
+            # Which furniture, if any, is holding this person up. Hip midpoint
+            # is the test point — that is what a seat actually supports.
+            _support = support_point(kpts if has_kpts else None, (x1, y1, x2, y2))
+            _furniture = furniture_zone_at(cam_id, _support)
+            if _furniture:
+                cv2.circle(display, (int(_support[0]), int(_support[1])),
+                           5, (160, 160, 255), -1)
+                cv2.putText(display, f"on {_furniture}", (x1, y2 + 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 255), 1)
+
+            fall_status, fall_alert = fall_sm.update(angle, aspect, has_kpts, now,
+                                                     bbox_h=(y2 - y1), posture=posture,
+                                                     seated=_seated,
+                                                     seated_deep=_seated_deep,
+                                                     furniture=_furniture,
+                                                     center_y=(y1 + y2) / 2.0,
+                                                     extent_ratio=body_extent_ratio(
+                                                         kpts if has_kpts else None,
+                                                         y2 - y1))
+            if fall_sm.is_fallen():
+                note_fallen(cam_id, tid, now)
+            # Remember where they were, so the persistence path can judge
+            # whether a disappearance looks like an exit or a collapse.
+            fall_sm.last_box = (x1, y1, x2, y2)
+
 
             if fall_alert:
                 if "FALL" in fall_alert:
-                    send_alert(cam_id, "EMERGENCY", f"[ID {tid}] {fall_alert}", detection="fall_detected")
+                    # "PROLONGED FALL" also contains "FALL", so it must be
+                    # tested first or the clip is filed as a plain fall.
+                    send_alert(cam_id, "EMERGENCY", f"[ID {tid}] {fall_alert}",
+                               detection=("prolonged_fall"
+                                          if "PROLONGED FALL" in fall_alert
+                                          else "fall_detected"),
+                               track_id=tid, box=(x1, y1, x2, y2))
                 elif "LYING DOWN" in fall_alert:
-                    send_alert(cam_id, "WARNING",   f"[ID {tid}] {fall_alert}", detection="lying_down")
+                    send_alert(cam_id, "WARNING",   f"[ID {tid}] {fall_alert}", detection="lying_down",
+                               track_id=tid, box=(x1, y1, x2, y2))
 
                 # Clear pacing + inactivity state for this track. The pacing
                 # detector's 60-second deque still contains positions from
@@ -1714,15 +3183,6 @@ def process_camera_thread(cam_id):
                 # the person recovers and stays in frame long enough.
                 pacing_det.reset()
                 movement_tr.reset()
-
-            if fall_status == "FALLEN":
-                cv2.rectangle(display, (x1, y1), (x2, y2), (0, 0, 255), 5)
-                cv2.putText(display, fall_sm._last_fall_label, (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            elif fall_status == "STUMBLE":
-                cv2.rectangle(display, (x1, y1), (x2, y2), (0, 140, 255), 3)
-                cv2.putText(display, "STUMBLE DETECTED", (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 140, 255), 2)
 
             track_status = "NORMAL"
             if fall_status == "FALLEN":
@@ -1779,7 +3239,8 @@ def process_camera_thread(cam_id):
 
                 if body_alert:
                     print(f"[BODY AGI {cam_id} ID{tid}] 🔴 AGITATION_RISK — sending alert")
-                    send_alert(cam_id, "WARNING", f"[ID {tid}] {body_alert}", detection="agitation")
+                    send_alert(cam_id, "WARNING", f"[ID {tid}] {body_alert}", detection="agitation",
+                               track_id=tid)
                     last_behavior_per[tid] = body_alert
                     if _priority(body_alert) > _priority(track_status):
                         track_status = body_alert
@@ -1809,7 +3270,8 @@ def process_camera_thread(cam_id):
                     pacing_score, pacing_alert = pacing_det.update(center_px, now)
 
                     if pacing_alert:
-                        send_alert(cam_id, "WARNING", f"[ID {tid}] {pacing_alert}", detection="pacing")
+                        send_alert(cam_id, "WARNING", f"[ID {tid}] {pacing_alert}", detection="pacing",
+                                   track_id=tid)
                         last_pacing_per[tid] = pacing_alert
                         if _priority(pacing_alert) > _priority(track_status):
                             track_status = pacing_alert
@@ -1831,22 +3293,35 @@ def process_camera_thread(cam_id):
                 # Uses bbox centroid (not keypoints) — runs on every tracked
                 # bbox regardless of pose confidence. has_kpts is passed
                 # through only for the posture-aware INACTIVE—POSTURE variant.
-                movement_result = movement_tr.update(
-                    center_px, now,
-                    torso_angle=angle,
-                    has_kpts=has_kpts,
-                )
-                # Standing-upright gate: suppress inactivity for a person who
-                # is standing normally. Reset the timer so it restarts cleanly
-                # if they sit or crouch later.
-                if (aspect > INACTIVITY_STANDING_ASPECT_MIN
-                        and angle < INACTIVITY_STANDING_ANGLE_MAX):
+                #
+                # Standing-upright gate: check BEFORE update() so the timer
+                # never accumulates while the person is upright. Checking
+                # after update() let the timer run internally and fire alerts
+                # that got caught and reset — but the timer immediately
+                # restarted the next frame and the cycle repeated.
+                # angle defaults to 0.0 when has_kpts=False, so the angle
+                # check safely passes for tall-bbox tracks without pose data.
+                # Aspect ratio alone is the reliable standing indicator —
+                # the bbox docstring states h/w > 1.5 = standing.
+                # The angle condition was removed: torso angle computed from
+                # CCTV-angle keypoints is too noisy for standing people
+                # (frequently 30–50° even when fully upright), so AND-ing
+                # it caused the gate to silently fail and let the timer run.
+                _is_standing = (aspect > INACTIVITY_STANDING_ASPECT_MIN)
+                if _is_standing:
                     movement_result = None
                     movement_tr.reset()
                     last_movement_per.pop(tid, None)
+                else:
+                    movement_result = movement_tr.update(
+                        center_px, now,
+                        torso_angle=angle,
+                        has_kpts=has_kpts,
+                    )
                 if movement_result and movement_result != last_movement_per.get(tid):
                     level = "EMERGENCY" if "INACTIVE" in movement_result else "WARNING"
-                    send_alert(cam_id, level, f"[ID {tid}] {movement_result}", detection="inactivity")
+                    send_alert(cam_id, level, f"[ID {tid}] {movement_result}", detection="inactivity",
+                               track_id=tid)
                     last_movement_per[tid] = movement_result
                 elif not movement_result and not movement_tr.is_stationary(now):
                     last_movement_per.pop(tid, None)
@@ -1854,14 +3329,86 @@ def process_camera_thread(cam_id):
                    _priority(last_movement_per[tid]) > _priority(track_status):
                     track_status = last_movement_per[tid]
 
+            # ── Per-track visuals, in the ONE colour this track's status maps
+            # to. Drawn last so the box, the label, the ID and the skeleton
+            # are always consistent with each other and with the HUD band.
+            t_prio  = _priority(track_status)
+            t_color = status_color(track_status)
+            # Thickness carries severity for anyone who cannot rely on colour:
+            # 2 = normal, 3 = warning, 5 = emergency.
+            t_thick = 5 if t_prio >= 7 else (3 if t_prio >= 4 else 2)
+            cv2.rectangle(display, (x1, y1), (x2, y2), t_color, t_thick)
+            cv2.putText(display, f"ID {tid}", (x1, y2 + 18),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, t_color, 1)
+            draw_pose_overlay(display, kpts, color=t_color)
+            if t_prio >= 2:
+                cv2.putText(display, track_status, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, t_color, 2)
+
             # Update camera-level worst status
-            if _priority(track_status) > _priority(worst_status):
+            if t_prio > _priority(worst_status):
                 worst_status = track_status
 
         # ── Garbage-collect stale tracks ─────────────────────────────────
         # Person walked out of frame → drop their state after TRACK_TIMEOUT_S
         # so a returning visitor doesn't inherit stale fall/movement history.
-        stale = [tid for tid, t in last_seen.items() if now - t > TRACK_TIMEOUT_S]
+        # ── Keep ticking anyone last seen on the floor ────────────────────
+        # Their track is gone, but the conclusion that they fell still stands.
+        if PERSIST_FALLEN_ON:
+            _seen_now = {o["tid"] for o in observations}
+            for _tid, _sm in list(fall_machines.items()):
+                if _tid in _seen_now:
+                    continue
+                # Track died mid-descent before the state could commit —
+                # commit it now rather than waiting for the person to move.
+                if not _sm.is_fallen():
+                    if not _sm.promote_on_vanish(now):
+                        if PERSIST_DEBUG:
+                            print(f"[PERSIST {cam_id}] ID {_tid}: cannot promote — "
+                                  f"state={_sm._state} candidate={_sm._candidate} "
+                                  f"count={_sm._candidate_count} "
+                                  f"seated_sticky={now < _sm._seated_until}")
+                        continue
+                    if PERSIST_DEBUG:
+                        print(f"[PERSIST {cam_id}] ID {_tid}: track lost mid-fall — "
+                              f"committing FALLEN from pending candidate")
+                if not _sm.vanished_mid_frame(INFERENCE_W, INFERENCE_H):
+                    if PERSIST_DEBUG:
+                        print(f"[PERSIST {cam_id}] ID {_tid}: skipped, last box "
+                              f"{getattr(_sm, 'last_box', None)} touches the border")
+                    continue            # last seen at the border — likely exited
+                note_fallen(cam_id, _tid, now)   # still down, keep clip rolling
+                _a = _sm.tick_absent(now)
+                if PERSIST_DEBUG and not _a:
+                    print(f"[PERSIST {cam_id}] ID {_tid}: holding FALLEN "
+                          f"{now - (_sm._fallen_since or now):.1f}s, no alert due yet")
+                if not _a:
+                    continue
+                _msg = f"[ID {_tid}] {_a} — NO LONGER VISIBLE"
+                _lb = getattr(_sm, "last_box", None)
+                if "FALL" in _a:
+                    send_alert(cam_id, "EMERGENCY", _msg,
+                               detection=("prolonged_fall"
+                                          if "PROLONGED FALL" in _a
+                                          else "fall_detected"),
+                               track_id=_tid, box=_lb)
+                elif "LYING DOWN" in _a:
+                    send_alert(cam_id, "WARNING", _msg, detection="lying_down",
+                               track_id=_tid, box=_lb)
+                if worst_status in ("NO PERSON", "NORMAL"):
+                    worst_status = "FALLEN (UNSEEN)"
+
+        # A track last seen ON THE FLOOR is held far longer than one that
+        # simply walked out of frame — deleting it at 5s is what erased the
+        # fall before the confirmation timer could complete.
+        stale = []
+        for tid, t in last_seen.items():
+            _sm = fall_machines.get(tid)
+            _limit = (FALLEN_TIMEOUT_S
+                      if (PERSIST_FALLEN_ON and _sm is not None and _sm.is_fallen())
+                      else TRACK_TIMEOUT_S)
+            if now - t > _limit:
+                stale.append(tid)
         for tid in stale:
             fall_machines.pop(tid, None)
             body_agi_scorers.pop(tid, None)
@@ -1876,17 +3423,11 @@ def process_camera_thread(cam_id):
         # ── On-frame HUD ──────────────────────────────────────────────────
         # HUD bar spans the full frame width and a fixed pixel height so it
         # scales correctly when INFERENCE_W is bumped to 1280 on GPU setups.
-        color = STATUS_COLORS.get(worst_status, (200, 200, 200))
-        h_disp, w_disp = display.shape[:2]
-        cv2.rectangle(display, (0, 0), (w_disp, 40), (0, 0, 0), -1)
         n_people = len(observations)
-        cv2.putText(display,
-                    f"[{cam_id}] {n_people} person(s) | WORST: {worst_status}",
-                    (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        # Right-align the timestamp regardless of frame width.
-        cv2.putText(display, time.strftime("%H:%M:%S"),
-                    (max(10, w_disp - 80), 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        draw_status_bar(display, cam_id,
+                        f"{n_people} person(s) | WORST: {worst_status}",
+                        status_color(worst_status),
+                        clock=time.strftime("%H:%M:%S"))
 
         with lock:
             if cam_frames[cam_id] is None:
@@ -1920,14 +3461,34 @@ def generate_frames(cam_id):
     _offline_frame   = _make_offline_frame(cam_id)
     _offline_sent_at = 0.0
     while True:
+        # 1) Annotated inference frame (normal path).
         with lock:
-            raw = cam_frames.get(cam_id)
-            frame = raw.copy() if raw is not None else None
+            _inf = cam_frames.get(cam_id)
+            frame = _inf.copy() if _inf is not None else None
 
         if frame is None:
-            # Yield a placeholder at ~1 fps so the MJPEG stream stays alive
-            # and Cloudflare doesn't 524. Switches to live frames the moment
-            # the capture thread delivers one.
+            # 2) YOLO not ready yet — fall back to raw capture frame so the
+            #    browser shows video immediately instead of "CAMERA OFFLINE"
+            #    for the entire warmup period (YOLO load can take 15-30s).
+            with raw_lock:
+                _raw = raw_frames.get(cam_id)
+                raw_frame = _raw[0].copy() if _raw is not None else None
+
+            if raw_frame is not None:
+                cv2.putText(raw_frame, "AI LOADING...", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+                _, buf = cv2.imencode(".jpg", raw_frame,
+                                      [cv2.IMWRITE_JPEG_QUALITY, 65])
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n"
+                    + buf.tobytes()
+                    + b"\r\n"
+                )
+                time.sleep(0.033)
+                continue
+
+            # 3) No frames at all — show offline placeholder at ~1 fps.
             now = time.time()
             if now - _offline_sent_at >= 1.0:
                 yield (
