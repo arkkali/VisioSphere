@@ -1,6 +1,9 @@
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 const Incident = require('../models/Incident');
 const { dispatchIncidentPushToStaff } = require('../services/notificationService');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 const parseAlert = (payload = {}) => {
   const { type, message = '', location = 'Unknown', alertKey, clipPath } = payload;
@@ -52,10 +55,42 @@ const initSocket = (server) => {
     },
   });
 
+  // Every connecting socket must present one of two credentials:
+  //   - AI_SERVICE_TOKEN (ai_core) -> tagged isAiService, allowed to write
+  //     cctv_alert / cctv_alert_clip.
+  //   - a valid login JWT (dashboard browser clients) -> tagged with the
+  //     decoded user, read-only (never calls the write handlers below).
+  // Anything else is refused at the handshake, so dashboard_alert broadcasts
+  // (which include resident names/locations/incident descriptions) are no
+  // longer readable by an unauthenticated client.
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token;
+
+    if (token && process.env.AI_SERVICE_TOKEN && token === process.env.AI_SERVICE_TOKEN) {
+      socket.isAiService = true;
+      return next();
+    }
+
+    try {
+      socket.user = jwt.verify(token, JWT_SECRET);
+      socket.isAiService = false;
+      return next();
+    } catch {
+      return next(new Error('unauthorized'));
+    }
+  });
+
   io.on('connection', (socket) => {
-    console.log(`[Socket.io] Client connected: ${socket.id}`);
+    console.log(
+      `[Socket.io] Client connected: ${socket.id}` +
+      (socket.isAiService ? ' (role: ai-service)' : '')
+    );
 
     socket.on('cctv_alert', async (data) => {
+      if (!socket.isAiService) {
+        console.warn(`[Socket.io] Rejected cctv_alert from unauthenticated socket ${socket.id}`);
+        return;
+      }
       let saved = null;
 
       try {
@@ -87,6 +122,10 @@ const initSocket = (server) => {
     });
 
     socket.on('cctv_alert_clip', async (data) => {
+      if (!socket.isAiService) {
+        console.warn(`[Socket.io] Rejected cctv_alert_clip from unauthenticated socket ${socket.id}`);
+        return;
+      }
       const { alertKey, clipPath, location } = data || {};
       if (!alertKey || !clipPath) return;
 
