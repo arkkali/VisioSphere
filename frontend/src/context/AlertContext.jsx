@@ -26,6 +26,11 @@ export const AlertProvider = ({ children }) => {
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,
+      // Function form (not a static object) so the latest token is read
+      // from localStorage on every connect/reconnect attempt — matters
+      // after a login, a token refresh, or a backend restart that forces
+      // a reconnect while this provider stays mounted.
+      auth: (cb) => cb({ token: localStorage.getItem("token") }),
     });
     socketRef.current = socket;
 
@@ -35,6 +40,12 @@ export const AlertProvider = ({ children }) => {
 
     socket.on("disconnect", () => {
       setIsConnected(false);
+    });
+
+    socket.on("connect_error", (err) => {
+      // Most likely cause: missing/expired token in localStorage, now that
+      // the backend rejects unauthenticated socket connections.
+      console.warn("[Socket.io] connect_error:", err.message);
     });
 
     if (!attachedRef.current) {
