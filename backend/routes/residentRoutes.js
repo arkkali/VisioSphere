@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/residentController');
 const { spreadsheetUpload } = require('../config/multer');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, authorizeRoles } = require('../middleware/auth');
 const { uploadLimiter, writeLimiter, readLimiter } = require('../config/rateLimiter');
 
 // Act 4: new resource-style, paginated list. GET /all kept below, unpaginated,
@@ -17,6 +17,9 @@ router.post('/batch',                                                 verifyToke
 router.post('/import', verifyToken, uploadLimiter, writeLimiter,      spreadsheetUpload.single('file'),        ctrl.importPreview);
 router.get('/:id',                                                    verifyToken, readLimiter,                ctrl.getOne);
 router.put('/:id',                                                    verifyToken, writeLimiter,               ctrl.update);
-router.delete('/:id',                                                 verifyToken, writeLimiter,               ctrl.remove);
+// Act 5: Facility-Admin-only. Deleting a resident record was previously only hidden in the UI
+// (BulkActionBar hides Delete when isNurseView) — the server accepted any valid token regardless
+// of role. authorizeRoles existed in middleware/auth.js but was never wired into any route.
+router.delete('/:id',                                                 verifyToken, authorizeRoles('Facility Admin'), writeLimiter, ctrl.remove);
 
 module.exports = router;
