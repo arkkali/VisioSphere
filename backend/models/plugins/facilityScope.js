@@ -183,7 +183,7 @@ module.exports = function facilityScope(schema, options = {}) {
      across an upgrade in either direction. Calling next() unconditionally is
      what produced "next is not a function" on every document create.
      ─────────────────────────────────────────────────────────────────────── */
-  schema.pre('save', function (...args) {
+  const stampDoc = function (...args) {
     const next = typeof args[0] === 'function' ? args[0] : null;
 
     if (!this.facility) {
@@ -192,7 +192,18 @@ module.exports = function facilityScope(schema, options = {}) {
     }
 
     if (next) return next();
-  });
+  };
+
+  // MUST be pre('validate'), not pre('save'): Mongoose 9 runs validation
+  // BEFORE pre('save') middleware, so stamping there is too late — the doc is
+  // rejected with "Path `facility` is required" before the hook ever fires.
+  // That is what broke nurse/guardian/resident creation, where the facility is
+  // inherited from context rather than passed in explicitly.
+  schema.pre('validate', stampDoc);
+
+  // Belt and braces for save({ validateBeforeSave: false }), which skips the
+  // validate hook entirely.
+  schema.pre('save', stampDoc);
 
   schema.pre('insertMany', function (...args) {
     const next = typeof args[0] === 'function' ? args[0] : null;
