@@ -13,6 +13,7 @@ import WeekDetailModal from '../components/dashboard/WeekDetailModal';
 import AlertHistoryModal from '../components/dashboard/AlertHistoryModal';
 import dashboardService from '../services/dashboardService';
 import { ACTIVE_CAMERA_COUNT, TOTAL_CAMERA_COUNT } from '../constants/cameras';
+import { isNurseId, isAdminId } from '../constants/idRoles';
 
 const incidentTypeToCategory = (incidentType) => {
   switch (incidentType) {
@@ -220,9 +221,9 @@ const AdminDashboard = () => {
         setLoading(true);
         setError(null);
         if (isNurseView) {
-          if (storedId.startsWith('A-') || storedId.startsWith('N-')) {
+          if (isAdminId(storedId) || isNurseId(storedId)) {
             try {
-              const route = storedId.startsWith('A-')
+              const route = isAdminId(storedId)
                 ? `/nurses/linked-profile/${storedId}`
                 : `/nurses/${storedId}`;
               const nurseRes = await axiosInstance.get(route, { signal: abortController.signal });
@@ -313,11 +314,11 @@ const AdminDashboard = () => {
       try {
         if (isNurseView) {
           let targetId = adminProfile.id;
-          if (targetId.startsWith('A-')) {
+          if (isAdminId(targetId)) {
             const nurseRes = await axiosInstance.get(`/nurses/linked-profile/${targetId}`);
             targetId = nurseRes.data.nurseId;
           }
-          if (targetId?.startsWith('N-')) {
+          if (isNurseId(targetId)) {
             await axiosInstance.post('/nurses/upload-profile-pic', { nurseId: targetId, imageBase64: base64String });
             setProfilePic(base64String);
             localStorage.setItem('nurseProfilePic', base64String);

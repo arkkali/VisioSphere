@@ -5,6 +5,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import visioSphereLogo from '../assets/visioSphereLogo.png'; 
 import matandaAnime from '../assets/MatandaAnime.png';
 import { useTheme } from '../context/ThemeContext';
+import { isNurseId, isAdminId, isEmail as isEmailIdentifier } from '../constants/idRoles';
 
 /**
  * Pull the `facility` claim out of a JWT payload.
@@ -147,9 +148,12 @@ const Login = () => {
     setLoading(true);
 
     const checkId = loginId.trim();
-    const isNurseLogin = checkId.toUpperCase().startsWith('N-');
-    const isAdminLogin = checkId.toUpperCase().startsWith('A-');
-    const isEmail = checkId.includes('@');
+    // Role comes from the id prefix; the ADMIN prefix varies per facility
+    // (A- for Graces, STA- for Saint Anthony), so it must not be hardcoded.
+    // See constants/idRoles.js.
+    const isNurseLogin = isNurseId(checkId);
+    const isAdminLogin = isAdminId(checkId);
+    const isEmail = isEmailIdentifier(checkId);
 
     if (!isNurseLogin && !isAdminLogin && !isEmail) {
       setError('Invalid format or credentials provided.');
