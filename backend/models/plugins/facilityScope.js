@@ -146,21 +146,36 @@ module.exports = function facilityScope(schema, options = {}) {
     if (facility) this.pipeline().unshift({ $match: { facility } });
   });
 
-  /* ── creates ─────────────────────────────────────────────────────────── */
-  schema.pre('save', function (next) {
+  /* ── creates ─────────────────────────────────────────────────────────────
+     Mongoose 9 dropped the callback style for document middleware:
+       pre('save')       is invoked with NO arguments
+       pre('insertMany') is invoked with just (docs)
+     Mongoose 6/7 passed `next` first in both cases. These hooks detect which
+     convention is in play instead of assuming, so the plugin keeps working
+     across an upgrade in either direction. Calling next() unconditionally is
+     what produced "next is not a function" on every document create.
+     ─────────────────────────────────────────────────────────────────────── */
+  schema.pre('save', function (...args) {
+    const next = typeof args[0] === 'function' ? args[0] : null;
+
     if (!this.facility) {
       const ctx = getContext();
       if (ctx && !ctx.unscoped && ctx.facility) this.facility = ctx.facility;
     }
-    next();
+
+    if (next) return next();
   });
 
-  schema.pre('insertMany', function (next, docs) {
+  schema.pre('insertMany', function (...args) {
+    const next = typeof args[0] === 'function' ? args[0] : null;
+    const docs = next ? args[1] : args[0];
+
     const ctx = getContext();
     if (ctx && !ctx.unscoped && ctx.facility && Array.isArray(docs)) {
       docs.forEach((d) => { if (d && !d.facility) d.facility = ctx.facility; });
     }
-    next();
+
+    if (next) return next();
   });
 
   /* ── upserts: the filter is scoped above, but $set needs the value too,
