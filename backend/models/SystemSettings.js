@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-
+const facilityScope = require('./plugins/facilityScope');
 const zoneSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String, default: '' }
@@ -29,5 +29,9 @@ const systemSettingsSchema = new mongoose.Schema({
     auditTrailRetentionDays: { type: Number, default: 90 }
   }
 }, { timestamps: true });
+
+// Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+// See models/plugins/facilityScope.js.
+systemSettingsSchema.plugin(facilityScope);
 
 module.exports = mongoose.model('SystemSettings', systemSettingsSchema);

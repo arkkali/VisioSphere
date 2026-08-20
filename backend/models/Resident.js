@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-
+const facilityScope = require('./plugins/facilityScope');
 const residentSchema = new mongoose.Schema(
   {
     residentId: {
@@ -114,5 +114,9 @@ residentSchema.statics.discharge = async function (residentId) {
     { new: true }
   );
 };
+
+// Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+// See models/plugins/facilityScope.js.
+residentSchema.plugin(facilityScope);
 
 module.exports = mongoose.model('Resident', residentSchema);

@@ -1,5 +1,6 @@
   const mongoose = require('mongoose');
 
+  const facilityScope = require('./plugins/facilityScope');
   const auditLogSchema = new mongoose.Schema({
     category: {
       type: String,
@@ -38,5 +39,13 @@
       default: null
     }
   }, { timestamps: true });
+
+
+  // Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+
+  // See models/plugins/facilityScope.js.
+
+  auditLogSchema.plugin(facilityScope);
+
 
   module.exports = mongoose.model('AuditLog', auditLogSchema);

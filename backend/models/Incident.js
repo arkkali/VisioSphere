@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-
+const facilityScope = require('./plugins/facilityScope');
 const incidentSchema = new mongoose.Schema(
   {
     source: {
@@ -61,5 +61,9 @@ const incidentSchema = new mongoose.Schema(
 );
 
 incidentSchema.index({ createdAt: -1, severity: 1 });
+
+// Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+// See models/plugins/facilityScope.js.
+incidentSchema.plugin(facilityScope);
 
 module.exports = mongoose.model('Incident', incidentSchema);

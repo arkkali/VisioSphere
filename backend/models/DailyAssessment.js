@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-
+const facilityScope = require('./plugins/facilityScope');
 const blockSchema = new mongoose.Schema({
   type: {
     type: String,
@@ -36,5 +36,9 @@ const dailyAssessmentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 dailyAssessmentSchema.index({ residentId: 1, createdAt: -1 });
+
+// Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+// See models/plugins/facilityScope.js.
+dailyAssessmentSchema.plugin(facilityScope);
 
 module.exports = mongoose.model('DailyAssessment', dailyAssessmentSchema);

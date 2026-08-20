@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const facilityScope = require('./plugins/facilityScope');
 const bcrypt   = require('bcryptjs');
 
 const nurseSchema = new mongoose.Schema({
@@ -80,5 +81,9 @@ nurseSchema.statics.deactivate = async function (nurseId) {
     { new: true }
   );
 };
+
+// Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+// See models/plugins/facilityScope.js.
+nurseSchema.plugin(facilityScope);
 
 module.exports = mongoose.model('Nurse', nurseSchema);

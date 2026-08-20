@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const facilityScope = require('./plugins/facilityScope');
 const bcrypt = require('bcryptjs');
 
 const guardianSchema = new mongoose.Schema({
@@ -74,5 +75,9 @@ guardianSchema.statics.generateGuardianId = async function () {
 
   return `${prefix}${nextNumber.toString().padStart(2, '0')}`;
 };
+
+// Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+// See models/plugins/facilityScope.js.
+guardianSchema.plugin(facilityScope);
 
 module.exports = mongoose.model('Guardian', guardianSchema);

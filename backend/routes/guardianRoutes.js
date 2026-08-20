@@ -1,14 +1,14 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/guardianController');
 const { spreadsheetUpload, imageUpload } = require('../config/multer');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, crossFacility } = require('../middleware/auth');
 const { authLimiter, uploadLimiter, writeLimiter, readLimiter } = require('../config/rateLimiter');
 
-router.post('/auth/login',          authLimiter,                                                              ctrl.login);
-router.post('/auth/request-otp',    authLimiter,                                                              ctrl.requestOtp);
-router.post('/auth/verify-otp',     authLimiter,                                                              ctrl.verifyOtp);
-router.post('/auth/reset-password', authLimiter,                                                              ctrl.resetPassword);
-router.post('/auth/set-password',   authLimiter,                                                              ctrl.setPassword);
+router.post('/auth/login',          crossFacility, authLimiter,                                                              ctrl.login);
+router.post('/auth/request-otp',    crossFacility, authLimiter,                                                              ctrl.requestOtp);
+router.post('/auth/verify-otp',     crossFacility, authLimiter,                                                              ctrl.verifyOtp);
+router.post('/auth/reset-password', crossFacility, authLimiter,                                                              ctrl.resetPassword);
+router.post('/auth/set-password',   crossFacility, authLimiter,                                                              ctrl.setPassword);
 router.put('/auth/change-password',                                    verifyToken, authLimiter,               ctrl.changePassword);
 router.get('/all',                                                     verifyToken, readLimiter,               ctrl.getAll);
 router.get('/filter/house/:house',                                     verifyToken, readLimiter,               ctrl.getByHouse);

@@ -54,7 +54,7 @@ exports.login = async (identifier, password) => {
     return {
       isFirstLogin: true,
       guardianId: guardian.guardianId,
-      tempToken: jwt.sign({ guardianId: guardian.guardianId }, JWT_SECRET, { expiresIn: '15m' }),
+      tempToken: jwt.sign({ guardianId: guardian.guardianId, role: 'Guardian', facility: guardian.facility }, JWT_SECRET, { expiresIn: '15m' }),
       guardian: guardianPublicFields(guardian)
     };
   }
@@ -72,7 +72,7 @@ exports.login = async (identifier, password) => {
     throwError('Invalid password', 401);
   }
 
-  const token = jwt.sign({ guardianId: guardian.guardianId }, JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ guardianId: guardian.guardianId, role: 'Guardian', facility: guardian.facility }, JWT_SECRET, { expiresIn: '7d' });
 
   await AuditLog.create({
     category: 'Authentication', event: 'Login',

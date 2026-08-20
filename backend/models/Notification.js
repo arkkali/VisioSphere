@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-
+const facilityScope = require('./plugins/facilityScope');
 const notificationSchema = new mongoose.Schema({
   guardianId: { 
     type: String, 
@@ -42,5 +42,9 @@ const notificationSchema = new mongoose.Schema({
     default: false 
   }
 }, { timestamps: true });
+
+// Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+// See models/plugins/facilityScope.js.
+notificationSchema.plugin(facilityScope);
 
 module.exports = mongoose.model('Notification', notificationSchema);

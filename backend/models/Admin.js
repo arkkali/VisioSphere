@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-
+const facilityScope = require('./plugins/facilityScope');
 const adminSchema = new mongoose.Schema({
   customId:      { type: String, unique: true },
   name:          { type: String, required: true },
@@ -47,5 +47,9 @@ adminSchema.statics.generateCustomId = async function (role) {
 
   return null;
 };
+
+// Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
+// See models/plugins/facilityScope.js.
+adminSchema.plugin(facilityScope);
 
 module.exports = mongoose.model('Admin', adminSchema, 'admins');

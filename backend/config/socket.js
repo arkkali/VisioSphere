@@ -2,6 +2,11 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const Incident = require('../models/Incident');
 const { dispatchIncidentPushToStaff } = require('../services/notificationService');
+const { facilityForCamera } = require('./facilities');
+const { runWithFacility } = require('../models/plugins/facilityScope');
+
+/** Socket.IO room a dashboard client joins, so alerts stay within a facility. */
+const roomFor = (facility) => `facility:${facility}`;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -36,6 +41,7 @@ const parseAlert = (payload = {}) => {
     trackId,
     alertKey,
     clipPath:    clipPath || undefined,
+    facility:    facilityForCamera(location),
   };
 };
 
@@ -81,6 +87,12 @@ const initSocket = (server) => {
   });
 
   io.on('connection', (socket) => {
+    // Dashboard clients join their facility's room. Without this, io.emit()
+    // below would deliver every alert — location, description, raw message —
+    // to BOTH facilities' dashboards.
+    if (!socket.isAiService && socket.user?.facility) {
+      socket.join(roomFor(socket.user.facility));
+    }
     console.log(
       `[Socket.io] Client connected: ${socket.id}` +
       (socket.isAiService ? ' (role: ai-service)' : '')
@@ -91,19 +103,27 @@ const initSocket = (server) => {
         console.warn(`[Socket.io] Rejected cctv_alert from unauthenticated socket ${socket.id}`);
         return;
       }
+      // ai_core's payload carries no facility, so it is derived from the
+      // camera name — the only tenant signal on this path. Unregistered
+      // cameras fall back to DEFAULT_FACILITY with a warning; see
+      // config/facilities.js CAMERA_FACILITY.
+      const facility = facilityForCamera(data?.location);
+
       let saved = null;
 
       try {
-        saved = await Incident.create(parseAlert(data));
+        saved = await runWithFacility(facility, () => Incident.create(parseAlert(data)));
       } catch (err) {
         console.error('[Incident] Failed to persist alert:', err.message);
       }
 
       if (saved) {
-        dispatchIncidentPushToStaff(saved);
+        // Scoped too: this reads Admin + Nurse to pick push targets, and would
+        // otherwise notify the other facility's staff phones.
+        runWithFacility(facility, () => dispatchIncidentPushToStaff(saved));
       }
 
-      io.emit('dashboard_alert', saved ? {
+      io.to(roomFor(facility)).emit('dashboard_alert', saved ? {
         _id:          saved._id,
         source:       saved.source,
         incidentType: saved.incidentType,
@@ -129,14 +149,16 @@ const initSocket = (server) => {
       const { alertKey, clipPath, location } = data || {};
       if (!alertKey || !clipPath) return;
 
+      const facility = facilityForCamera(location);
+
       try {
-        const updated = await Incident.findOneAndUpdate(
+        const updated = await runWithFacility(facility, () => Incident.findOneAndUpdate(
           { alertKey },
           { $set: { clipPath } },
           { returnDocument: 'after' }
-        );
+        ));
         if (!updated) return;
-        io.emit('dashboard_alert_clip', { _id: updated._id, alertKey, location, clipPath });
+        io.to(roomFor(facility)).emit('dashboard_alert_clip', { _id: updated._id, alertKey, location, clipPath });
       } catch (err) {
         console.error('[Incident] cctv_alert_clip update failed:', err.message);
       }

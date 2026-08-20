@@ -59,7 +59,7 @@ exports.login = async (nurseId, password) => {
       isFirstLogin: true,
       nurseId: nurse.nurseId,
       tempToken: jwt.sign(
-        { nurseId: nurse.nurseId, role: 'Nurse', name: `${nurse.firstName} ${nurse.lastName}` },
+        { nurseId: nurse.nurseId, role: 'Nurse', name: `${nurse.firstName} ${nurse.lastName}`, facility: nurse.facility },
         JWT_SECRET,
         { expiresIn: '15m' }
       ),
@@ -96,7 +96,7 @@ exports.login = async (nurseId, password) => {
   }
 
   const token = jwt.sign(
-    { nurseId: nurse.nurseId, role: 'Nurse', name: `${nurse.firstName} ${nurse.lastName}` },
+    { nurseId: nurse.nurseId, role: 'Nurse', name: `${nurse.firstName} ${nurse.lastName}`, facility: nurse.facility },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -135,7 +135,7 @@ exports.verify2FA = async (nurseId, pin) => {
   }
 
   const token = jwt.sign(
-    { nurseId: nurse.nurseId, role: 'Nurse', name: `${nurse.firstName} ${nurse.lastName}` },
+    { nurseId: nurse.nurseId, role: 'Nurse', name: `${nurse.firstName} ${nurse.lastName}`, facility: nurse.facility },
     JWT_SECRET,
     { expiresIn: '7d' }
   );

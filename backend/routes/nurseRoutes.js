@@ -1,14 +1,14 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/nurseController');
 const { spreadsheetUpload } = require('../config/multer');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, crossFacility } = require('../middleware/auth');
 const { authLimiter, uploadLimiter, writeLimiter, readLimiter } = require('../config/rateLimiter');
 
-router.post('/auth/login',          authLimiter,                                              ctrl.login);
-router.post('/auth/request-otp',    authLimiter,                                              ctrl.requestOtp);
-router.post('/auth/verify-otp',     authLimiter,                                              ctrl.verifyOtp);
-router.post('/auth/verify-2fa',     authLimiter,                                              ctrl.verify2FA);
-router.post('/auth/reset-password', authLimiter,                                              ctrl.resetPassword);
+router.post('/auth/login',          crossFacility, authLimiter,                                              ctrl.login);
+router.post('/auth/request-otp',    crossFacility, authLimiter,                                              ctrl.requestOtp);
+router.post('/auth/verify-otp',     crossFacility, authLimiter,                                              ctrl.verifyOtp);
+router.post('/auth/verify-2fa',     crossFacility, authLimiter,                                              ctrl.verify2FA);
+router.post('/auth/reset-password', crossFacility, authLimiter,                                              ctrl.resetPassword);
 router.get('/emergency-reset',                                        verifyToken, readLimiter,   ctrl.emergencyReset);
 router.get('/all',                                                    verifyToken, readLimiter,   ctrl.getAll);
 router.get('/filter/house/:house',                                    verifyToken, readLimiter,   ctrl.getByHouse);

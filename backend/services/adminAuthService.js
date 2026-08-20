@@ -44,7 +44,7 @@ exports.login = async (customId, password) => {
       isFirstLogin: true,
       customId: admin.customId,
       tempToken: jwt.sign(
-        { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name },
+        { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: admin.facility },
         JWT_SECRET,
         { expiresIn: '15m' }
       ),
@@ -83,7 +83,7 @@ exports.login = async (customId, password) => {
   }
 
   const token = jwt.sign(
-    { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name },
+    { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: admin.facility },
     JWT_SECRET,
     { expiresIn: '24h' }
   );
@@ -115,7 +115,7 @@ exports.verify2FA = async (customId, pin) => {
   }
 
   const token = jwt.sign(
-    { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name },
+    { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: admin.facility },
     JWT_SECRET,
     { expiresIn: '24h' }
   );
