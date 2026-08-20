@@ -45,7 +45,8 @@ exports.login = async (identifier, password) => {
       category: 'Authentication', event: 'Failed Login Attempt',
       actorName: guardian.guardianId, status: 'failed',
       purpose: 'Security monitoring for unauthorized access',
-      newValues: { reason: 'Account inactive' }
+      newValues: { reason: 'Account inactive' },
+      facility: guardian.facility
     });
     throwError('This guardian account is not active', 403);
   }
@@ -67,7 +68,8 @@ exports.login = async (identifier, password) => {
       category: 'Authentication', event: 'Failed Login Attempt',
       actorName: guardian.guardianId, status: 'failed',
       purpose: 'Security monitoring for unauthorized access',
-      newValues: { reason: 'Invalid credentials' }
+      newValues: { reason: 'Invalid credentials' },
+      facility: guardian.facility
     });
     throwError('Invalid password', 401);
   }
@@ -77,8 +79,9 @@ exports.login = async (identifier, password) => {
   await AuditLog.create({
     category: 'Authentication', event: 'Login',
     actorName: guardian.guardianId, status: 'success',
-    purpose: 'Track session starts and system access'
-  });
+    purpose: 'Track session starts and system access',
+      facility: guardian.facility
+    });
 
   return { isFirstLogin: false, token, guardian: guardianPublicFields(guardian) };
 };
@@ -96,8 +99,9 @@ exports.requestOtp = async (email) => {
     category: 'Authentication', event: 'OTP Requested',
     actorName: guardian.guardianId, status: 'success',
     purpose: 'Password reset initiation',
-    newValues: { targetEmail: email }
-  });
+    newValues: { targetEmail: email },
+      facility: guardian.facility
+    });
 
   const { error } = await resend.emails.send({
     from: process.env.MAIL_FROM || 'onboarding@resend.dev',
@@ -126,7 +130,8 @@ exports.verifyOtp = async (email, otpCode) => {
       category: 'Authentication', event: 'Failed OTP Verification',
       actorName: guardian.guardianId, status: 'failed',
       purpose: 'Security monitoring',
-      newValues: { reason: 'Invalid OTP code provided' }
+      newValues: { reason: 'Invalid OTP code provided' },
+      facility: guardian.facility
     });
     throwError('Invalid OTP code.', 400);
   }
@@ -155,8 +160,9 @@ exports.resetPassword = async (email, otpCode, newPassword, confirmPassword) => 
   await AuditLog.create({
     category: 'Authentication', event: 'Password Reset Successful',
     actorName: guardian.guardianId, status: 'success',
-    purpose: 'Account recovery completed'
-  });
+    purpose: 'Account recovery completed',
+      facility: guardian.facility
+    });
 
   return { guardianId: guardian.guardianId };
 };
@@ -178,8 +184,9 @@ exports.setPassword = async (guardianId, newPassword, confirmPassword) => {
   await AuditLog.create({
     category: 'Authentication', event: 'Set Password',
     actorName: guardian.guardianId, status: 'success',
-    purpose: 'First-time account security setup'
-  });
+    purpose: 'First-time account security setup',
+      facility: guardian.facility
+    });
 
   return { guardianId: guardian.guardianId };
 };
@@ -197,7 +204,8 @@ exports.changePassword = async (guardianId, oldPassword, newPassword, confirmPas
       category: 'Authentication', event: 'Failed Password Change',
       actorName: guardianId, status: 'failed',
       purpose: 'Security monitoring',
-      newValues: { reason: 'Incorrect old password' }
+      newValues: { reason: 'Incorrect old password' },
+      facility: guardian.facility
     });
     throwError('Incorrect current password.', 401);
   }
@@ -208,6 +216,7 @@ exports.changePassword = async (guardianId, oldPassword, newPassword, confirmPas
   await AuditLog.create({
     category: 'Authentication', event: 'Password Changed',
     actorName: guardianId, status: 'success',
-    purpose: 'User initiated password update'
+    purpose: 'User initiated password update',
+    facility: guardian.facility
   });
 };

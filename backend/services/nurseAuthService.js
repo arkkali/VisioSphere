@@ -25,7 +25,8 @@ exports.emergencyReset = async (nurseId) => {
     actorName: 'System Admin',
     purpose: 'Developer override for testing',
     status: 'alert',
-    newValues: { targetNurse: nurseId }
+    newValues: { targetNurse: nurseId },
+    facility: nurse.facility
   });
 };
 
@@ -49,7 +50,8 @@ exports.login = async (nurseId, password) => {
       category: 'Authentication', event: 'Failed Login Attempt',
       actorName: nurse.nurseId, status: 'failed',
       purpose: 'Security monitoring for unauthorized access',
-      newValues: { reason: 'Account inactive', role: 'Nurse' }
+      newValues: { reason: 'Account inactive', role: 'Nurse' },
+      facility: nurse.facility
     });
     throwError('Invalid credentials.', 401);
   }
@@ -79,7 +81,8 @@ exports.login = async (nurseId, password) => {
       category: 'Authentication', event: 'Failed Login Attempt',
       actorName: nurse.nurseId, status: 'failed',
       purpose: 'Security monitoring for unauthorized access',
-      newValues: { reason: 'Invalid credentials', role: 'Nurse' }
+      newValues: { reason: 'Invalid credentials', role: 'Nurse' },
+      facility: nurse.facility
     });
     throwError('Invalid credentials.', 401);
   }
@@ -105,8 +108,9 @@ exports.login = async (nurseId, password) => {
     category: 'Authentication', event: 'Login',
     actorName: nurse.nurseId, status: 'success',
     purpose: 'Track session starts and system access',
-    newValues: { role: 'Nurse', houseAssigned: nurse.houseAssigned }
-  });
+    newValues: { role: 'Nurse', houseAssigned: nurse.houseAssigned },
+      facility: nurse.facility
+    });
 
   return {
     isFirstLogin: false,
@@ -129,7 +133,8 @@ exports.verify2FA = async (nurseId, pin) => {
       category: 'Authentication', event: 'Failed 2FA Attempt',
       actorName: nurse.nurseId, status: 'failed',
       purpose: 'Security monitoring',
-      newValues: { reason: 'Invalid PIN provided' }
+      newValues: { reason: 'Invalid PIN provided' },
+      facility: nurse.facility
     });
     throwError('Invalid credentials.', 401);
   }
@@ -144,8 +149,9 @@ exports.verify2FA = async (nurseId, pin) => {
     category: 'Authentication', event: 'Login',
     actorName: nurse.nurseId, status: 'success',
     purpose: 'Track session starts and system access after 2FA',
-    newValues: { role: 'Nurse', houseAssigned: nurse.houseAssigned }
-  });
+    newValues: { role: 'Nurse', houseAssigned: nurse.houseAssigned },
+      facility: nurse.facility
+    });
 
   return {
     token,
@@ -170,8 +176,9 @@ exports.requestOtp = async (email) => {
     category: 'Authentication', event: 'OTP Requested',
     actorName: nurse.nurseId, status: 'success',
     purpose: 'Password reset initiation',
-    newValues: { targetEmail: email }
-  });
+    newValues: { targetEmail: email },
+      facility: nurse.facility
+    });
 
   const { error } = await resend.emails.send({
     from: process.env.MAIL_FROM || 'onboarding@resend.dev',
@@ -200,7 +207,8 @@ exports.verifyOtp = async (email, otpCode) => {
       category: 'Authentication', event: 'Failed OTP Verification',
       actorName: nurse.nurseId, status: 'failed',
       purpose: 'Security monitoring',
-      newValues: { reason: 'Invalid OTP code provided' }
+      newValues: { reason: 'Invalid OTP code provided' },
+      facility: nurse.facility
     });
     throwError('Invalid OTP code.', 400);
   }
@@ -226,8 +234,9 @@ exports.resetPassword = async (email, otpCode, newPassword, confirmPassword) => 
   await AuditLog.create({
     category: 'Authentication', event: 'Password Reset Successful',
     actorName: nurse.nurseId, status: 'success',
-    purpose: 'Account recovery completed'
-  });
+    purpose: 'Account recovery completed',
+      facility: nurse.facility
+    });
 
   return { nurseId: nurse.nurseId };
 };

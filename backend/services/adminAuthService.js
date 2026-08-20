@@ -34,7 +34,8 @@ exports.login = async (customId, password) => {
       category: 'Authentication', event: 'Failed Login Attempt',
       actorName: admin.name, actorRole: 'Facility Admin',
       purpose: 'Security monitoring', status: 'failed',
-      newValues: { reason: 'Account deactivated' }
+      newValues: { reason: 'Account deactivated' },
+      facility: admin.facility
     });
     throwError('Invalid credentials.', 401);
   }
@@ -59,7 +60,8 @@ exports.login = async (customId, password) => {
       category: 'Authentication', event: 'Failed Login Attempt',
       actorName: admin.name, actorRole: 'Facility Admin',
       purpose: 'Security monitoring for unauthorized access',
-      status: 'failed', newValues: { reason: 'Account has no password set' }
+      status: 'failed', newValues: { reason: 'Account has no password set' },
+      facility: admin.facility
     });
     throwError('Invalid credentials.', 401);
   }
@@ -70,7 +72,8 @@ exports.login = async (customId, password) => {
       category: 'Authentication', event: 'Failed Login Attempt',
       actorName: admin.name, actorRole: 'Facility Admin',
       purpose: 'Security monitoring for unauthorized access',
-      status: 'failed', newValues: { reason: 'Invalid credentials' }
+      status: 'failed', newValues: { reason: 'Invalid credentials' },
+      facility: admin.facility
     });
     throwError('Invalid credentials.', 401);
   }
@@ -91,8 +94,9 @@ exports.login = async (customId, password) => {
   await AuditLog.create({
     category: 'Authentication', event: 'Login', actorName: admin.name,
     actorRole: 'Facility Admin', purpose: 'Track session starts and system access',
-    status: 'success', newValues: { role: admin.role }
-  });
+    status: 'success', newValues: { role: admin.role },
+      facility: admin.facility
+    });
 
   return {
     isFirstLogin: false, token,
@@ -109,7 +113,8 @@ exports.verify2FA = async (customId, pin) => {
       category: 'Authentication', event: 'Failed 2FA Attempt',
       actorName: admin.name, actorRole: 'Facility Admin',
       purpose: 'Security monitoring', status: 'failed',
-      newValues: { reason: 'Invalid PIN provided' }
+      newValues: { reason: 'Invalid PIN provided' },
+      facility: admin.facility
     });
     throwError('Invalid credentials.', 401);
   }
@@ -123,8 +128,9 @@ exports.verify2FA = async (customId, pin) => {
   await AuditLog.create({
     category: 'Authentication', event: 'Login', actorName: admin.name,
     actorRole: 'Facility Admin', purpose: 'Track session starts and system access after 2FA',
-    status: 'success', newValues: { role: admin.role }
-  });
+    status: 'success', newValues: { role: admin.role },
+      facility: admin.facility
+    });
 
   return {
     token,
@@ -145,8 +151,9 @@ exports.requestOtp = async (email) => {
     category: 'Authentication', event: 'OTP Requested',
     actorName: admin.name, actorRole: 'Facility Admin',
     purpose: 'Password reset initiation', status: 'success',
-    newValues: { targetEmail: email }
-  });
+    newValues: { targetEmail: email },
+      facility: admin.facility
+    });
 
   const { error } = await resend.emails.send({
     from: process.env.MAIL_FROM || 'onboarding@resend.dev', to: email,
@@ -174,7 +181,8 @@ exports.verifyOtp = async (email, otpCode) => {
       category: 'Authentication', event: 'Failed OTP Verification',
       actorName: admin.name, actorRole: 'Facility Admin',
       purpose: 'Security monitoring', status: 'failed',
-      newValues: { reason: 'Invalid OTP code provided' }
+      newValues: { reason: 'Invalid OTP code provided' },
+      facility: admin.facility
     });
     throwError('Invalid OTP code.', 400);
   }
@@ -202,8 +210,9 @@ exports.resetPassword = async (email, otpCode, newPassword, confirmPassword) => 
   await AuditLog.create({
     category: 'Authentication', event: 'Password Reset Successful',
     actorName: admin.name, actorRole: 'Facility Admin',
-    purpose: 'Account recovery completed', status: 'success'
-  });
+    purpose: 'Account recovery completed', status: 'success',
+      facility: admin.facility
+    });
 
   return { customId: admin.customId };
 };

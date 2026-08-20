@@ -40,12 +40,16 @@
     }
   }, { timestamps: true });
 
-
   // Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
-
   // See models/plugins/facilityScope.js.
-
-  auditLogSchema.plugin(facilityScope);
-
+  //
+  // required:false — unlike every other tenant model, AuditLog must record
+  // events that happen BEFORE a facility is known, or where none exists: a
+  // failed login for an account that does not exist has no facility. Auth
+  // routes run unscoped (middleware/auth.js crossFacility), so those writes
+  // have no context to stamp from. Reads are still scoped, so rows with a null
+  // facility are invisible to both tenants' audit views by design — use
+  // runUnscoped() to review unattributable auth failures.
+  auditLogSchema.plugin(facilityScope, { required: false });
 
   module.exports = mongoose.model('AuditLog', auditLogSchema);
