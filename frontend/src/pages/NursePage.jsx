@@ -6,38 +6,32 @@ import AssignDrawer from '../components/nurses/AssignDrawer';
 import AddNurseModal from '../components/nurses/AddNurseModal';
 import EditNurseModal from '../components/nurses/EditNurseModal';
 import DeleteNurseModal from '../components/nurses/DeleteNurseModal';
+import { housesForCurrentUser } from '../constants/houses';
 
-const HOUSES = [
-  'House of St. Charbel',
-  'House of St. Francis',
-  'House of St. Gabriel',
-  'House of St. Rose of Lima',
-  'House of St. Sebastian',
-  'Louis S. Coson Hall',
-];
 
 const getFullName = (person) => {
   if (!person) return 'Unknown';
   return [person.firstName, person.middleName, person.lastName].filter(Boolean).join(' ');
 };
 
-const EMPTY_NEW_NURSE = {
+// Lazy: this module loads before login writes the facility to localStorage.
+const emptyNewNurse = () => ({
   firstName: '',
   middleName: '',
   lastName: '',
   email: '',
-  houseAssigned: HOUSES[0],
-};
+  houseAssigned: housesForCurrentUser()[0] || '',
+});
 
-const EMPTY_EDIT_NURSE = {
+const emptyEditNurse = () => ({
   nurseId: '',
   firstName: '',
   middleName: '',
   lastName: '',
   email: '',
-  houseAssigned: HOUSES[0],
+  houseAssigned: housesForCurrentUser()[0] || '',
   status: 'Active',
-};
+});
 
 const NursePage = () => {
   const [nurses, setNurses] = useState([]);
@@ -63,8 +57,8 @@ const NursePage = () => {
   const [activeNurseForAssign, setActiveNurseForAssign] = useState(null);
   const [elderSearchTerm, setElderSearchTerm] = useState('');
 
-  const [newNurse, setNewNurse] = useState(EMPTY_NEW_NURSE);
-  const [editNurse, setEditNurse] = useState(EMPTY_EDIT_NURSE);
+  const [newNurse, setNewNurse] = useState(emptyNewNurse);
+  const [editNurse, setEditNurse] = useState(emptyEditNurse);
 
   const showToast = (message, type = 'success') => {
     const id = toastIdCounter.current++;
@@ -151,7 +145,7 @@ const NursePage = () => {
       const created = await nurseService.addNurse({ ...newNurse, isFirstLogin: true });
       setNurses((prev) => [...prev, created]);
       setShowAddModal(false);
-      setNewNurse(EMPTY_NEW_NURSE);
+      setNewNurse(emptyNewNurse());
       showToast('Nurse provisioned successfully! They must complete setup via email.', 'success');
     } catch (err) {
       const msg = err.response?.data?.error || err.response?.data?.message || err.message;

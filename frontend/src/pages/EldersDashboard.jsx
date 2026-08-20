@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -13,6 +13,7 @@ import DeleteResidentModal from '../components/elders/DeleteResidentModal';
 import ImportPreviewModal from '../components/elders/ImportPreviewModal';
 import ReportModal from '../components/elders/ReportModal';
 import ArchiveModal from '../components/elders/ArchiveModal';
+import { housesForCurrentUser } from '../constants/houses';
 import {
   getAllResidents,
   updateResident,
@@ -24,17 +25,12 @@ import {
   getArchivedReports,
 } from '../services/eldersService';
 
-const HOUSES = [
-  'House of St. Charbel',
-  'House of St. Francis',
-  'House of St. Gabriel',
-  'House of St. Rose of Lima',
-  'House of St. Sebastian',
-  'Louis S. Coson Hall',
-];
-
-const EMPTY_NEW_RESIDENT = { firstName: '', middleName: '', lastName: '', house: HOUSES[0] };
-const EMPTY_EDIT_RESIDENT = { _id: '', firstName: '', middleName: '', lastName: '', house: HOUSES[0] };
+// Houses come from the signed-in user's facility, never a hardcoded list —
+// a Saint Anthony account must not be shown Graces' houses. These are lazy
+// functions rather than constants because this module is imported at app
+// start, BEFORE login has written the facility to localStorage.
+const emptyNewResident  = () => ({ firstName: '', middleName: '', lastName: '', house: housesForCurrentUser()[0] || '' });
+const emptyEditResident = () => ({ _id: '', firstName: '', middleName: '', lastName: '', house: housesForCurrentUser()[0] || '' });
 
 const getFullName = (resident) => {
   if (!resident) return '';
@@ -50,7 +46,14 @@ const EldersDashboard = () => {
 
   const [residents, setResidents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedHouse, setSelectedHouse] = useState('Overall');
+  // Only this facility's houses. 'Overall Facility' is meaningful only when
+  // there is more than one house to aggregate, so a single-house facility
+  // (Saint Anthony) opens straight on its house and never sees that tab.
+  const HOUSES = useMemo(() => housesForCurrentUser(), []);
+  const [selectedHouse, setSelectedHouse] = useState(() => {
+    const h = housesForCurrentUser();
+    return h.length > 1 ? 'Overall' : (h[0] || 'Overall');
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAttendance, setFilterAttendance] = useState('All');
   const [filterNotes, setFilterNotes] = useState('All');
@@ -63,8 +66,8 @@ const EldersDashboard = () => {
   const [tempNotes, setTempNotes] = useState('');
   const [toasts, setToasts] = useState([]);
 
-  const [newResident, setNewResident] = useState(EMPTY_NEW_RESIDENT);
-  const [editResident, setEditResident] = useState(EMPTY_EDIT_RESIDENT);
+  const [newResident, setNewResident] = useState(emptyNewResident);
+  const [editResident, setEditResident] = useState(emptyEditResident);
   const [deleteTargetIds, setDeleteTargetIds] = useState(new Set());
   const [previewData, setPreviewData] = useState([]);
   const [archivedReports, setArchivedReports] = useState([]);
@@ -204,7 +207,7 @@ const EldersDashboard = () => {
       const created = await addResident(newResident);
       setResidents((prev) => [...prev, created]);
       setShowAddModal(false);
-      setNewResident(EMPTY_NEW_RESIDENT);
+      setNewResident(emptyNewResident());
       showToast('Resident added successfully!', 'success');
     } catch (err) {
       showToast(`Error adding resident: ${err.response?.data?.message || err.message}`, 'error');
@@ -584,6 +587,7 @@ const EldersDashboard = () => {
 
             <div className="flex flex-col lg:flex-row justify-between lg:items-center mb-[20px] flex-wrap gap-[16px]">
               <div className="flex flex-col md:flex-row gap-[6px] md:gap-[10px] flex-wrap bg-white dark:bg-slate-800 p-[8px] rounded-[10px] shadow-sm border border-[#E5E7EB] dark:border-slate-700 w-full lg:w-auto transition-colors duration-300">
+                {HOUSES.length > 1 && (
                 <button
                   style={selectedHouse === 'Overall' ? { backgroundColor: isDark ? '#0ea5e9' : '#00212e', color: 'white' } : {}}
                   className={`w-full md:w-auto text-left md:text-center p-[8px_16px] bg-transparent border-none rounded-[6px] font-bold text-[0.85rem] cursor-pointer transition-all duration-200 whitespace-nowrap ${selectedHouse === 'Overall' ? 'shadow-md' : 'text-[#64748b] dark:text-slate-400 hover:text-[#00212e] dark:hover:text-white hover:bg-[#e2e8f0] dark:hover:bg-slate-700'}`}
@@ -591,7 +595,10 @@ const EldersDashboard = () => {
                 >
                   Overall Facility
                 </button>
-                <div className="hidden md:block w-[1px] bg-[#E5E7EB] dark:bg-slate-700 mx-[4px]"></div>
+                )}
+                {HOUSES.length > 1 && (
+                  <div className="hidden md:block w-[1px] bg-[#E5E7EB] dark:bg-slate-700 mx-[4px]"></div>
+                )}
                 {HOUSES.map((house) => (
                   <button
                     key={house}
@@ -755,7 +762,7 @@ const EldersDashboard = () => {
             newResident={newResident}
             setNewResident={setNewResident}
             onSave={handleAddResident}
-            onClose={() => { setShowAddModal(false); setNewResident(EMPTY_NEW_RESIDENT); }}
+            onClose={() => { setShowAddModal(false); setNewResident(emptyNewResident()); }}
           />
         )}
 
@@ -764,7 +771,7 @@ const EldersDashboard = () => {
             editResident={editResident}
             setEditResident={setEditResident}
             onSave={handleSaveEdit}
-            onClose={() => { setShowEditModal(false); setEditResident(EMPTY_EDIT_RESIDENT); }}
+            onClose={() => { setShowEditModal(false); setEditResident(emptyEditResident()); }}
           />
         )}
 
