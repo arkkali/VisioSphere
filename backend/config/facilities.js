@@ -84,7 +84,15 @@ const CAMERA_FACILITY = {
   'House of Charbel': FACILITIES.GRACES.key,
   'House of Gabriel': FACILITIES.GRACES.key,
   'Future CCTV 1':    FACILITIES.GRACES.key,
-  'Future CCTV 2':    FACILITIES.SAINT_ANTHONY.key,
+  'Future CCTV 2':    FACILITIES.GRACES.key,
+
+  // Registered ahead of the hardware. Saint Anthony's "Living Room" tile
+  // currently streams Graces' House of Gabriel rig (see frontend
+  // constants/cameras.js), so alerts still arrive labelled "House of Gabriel"
+  // and are attributed to GRACES — correct, since that is where the camera
+  // physically is. Once a real camera is added to ai_core as CAM_2_ID=Living
+  // Room, its incidents land in SAINT_ANTHONY with no further change here.
+  'Living Room':      FACILITIES.SAINT_ANTHONY.key,
 };
 
 /**
