@@ -5,12 +5,23 @@
  * mix: staff, residents, guardians, assessments, incidents and audit logs all
  * belong to exactly one facility.
  *
- * IMPORTANT — why facility is NOT derived from the customId prefix:
- * the prefixes encode ROLE, not facility. Admin.generateCustomId() mints
- * `A-` for admins, `N-` for nurses, `G-` for guardians, and Resident mints
- * `E-`. A nurse at either facility is `N-2026nn`, so there is no facility
- * signal in a nurse, guardian or resident id at all. Tenancy is therefore
- * carried by an explicit `facility` field on every document.
+ * HOW A RECORD GETS ITS FACILITY — nobody ever types or selects it.
+ *
+ *   Admins    the id prefix IS the facility. A-****** is Graces, STA-****** is
+ *             Saint Anthony (ADMIN_PREFIX_FACILITY below). Resolved at login
+ *             from the id the admin already signs in with.
+ *
+ *   Everyone  nurses (N-), guardians (G-) and residents (E-) use prefixes that
+ *   else      encode ROLE and are identical at both facilities — there is no
+ *             facility signal in those ids to read. They instead inherit the
+ *             facility of the admin who creates them, stamped automatically at
+ *             insert time by models/plugins/facilityScope.js.
+ *
+ *   Incidents from the camera that raised them (CAMERA_FACILITY below).
+ *
+ * Every document still stores a `facility` field — that is what queries filter
+ * on. For admins it mirrors the prefix; if the two ever disagree the prefix
+ * wins and adminAuthService logs the mismatch.
  */
 
 const FACILITIES = {
@@ -69,7 +80,40 @@ const CAMERA_FACILITY = {
   'Future CCTV 2':    FACILITIES.SAINT_ANTHONY.key,
 };
 
+/**
+ * Admin id prefix → facility. THIS IS THE AUTHORITY for admin accounts:
+ *
+ *   A-202602    → Grace's Home for the Aged
+ *   STA-202601  → Saint Anthony de Padua Home Care Center
+ *
+ * Nobody types their facility anywhere; it is read off the id they already
+ * sign in with. Built from FACILITIES so a new facility only has to be
+ * declared once, above.
+ *
+ * Only ADMIN ids carry a facility. Nurse (N-), Guardian (G-) and Resident (E-)
+ * prefixes encode role and are shared by both facilities, so those records
+ * inherit the facility of the admin who creates them — see
+ * models/plugins/facilityScope.js, which stamps it at insert time.
+ */
+const ADMIN_PREFIX_FACILITY = FACILITY_KEYS.reduce((map, key) => {
+  map[FACILITIES[key].adminIdPrefix.toUpperCase()] = key;
+  return map;
+}, {});
+
 const isFacility = (value) => FACILITY_KEYS.includes(value);
+
+/**
+ * Facility for an admin customId, from its prefix. Returns null when the
+ * prefix is not registered — callers must treat that as "unknown", never as a
+ * default, or an unregistered prefix would silently land in one tenant.
+ */
+const facilityForAdminId = (customId) => {
+  const match = String(customId ?? '').trim().toUpperCase().match(/^([A-Z]{1,4})-\d{6}$/);
+  return match ? (ADMIN_PREFIX_FACILITY[match[1]] || null) : null;
+};
+
+/** The id prefix a newly generated admin id should use for this facility. */
+const adminPrefixFor = (facilityKey) => FACILITIES[facilityKey]?.adminIdPrefix || null;
 
 const facilityForCamera = (cameraId) => {
   const match = CAMERA_FACILITY[cameraId];
@@ -91,7 +135,10 @@ module.exports = {
   FACILITY_KEYS,
   DEFAULT_FACILITY,
   CAMERA_FACILITY,
+  ADMIN_PREFIX_FACILITY,
   isFacility,
+  facilityForAdminId,
+  adminPrefixFor,
   facilityForCamera,
   housesFor,
   facilityForHouse,

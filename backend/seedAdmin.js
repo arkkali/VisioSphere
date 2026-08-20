@@ -20,7 +20,7 @@ const mongoose = require('mongoose');
 const bcryptjs = require('bcryptjs');
 const Admin = require('./models/Admin');
 const AuditLog = require('./models/AuditLog');
-const { FACILITIES, FACILITY_KEYS, isFacility } = require('./config/facilities');
+const { FACILITIES, FACILITY_KEYS, isFacility, facilityForAdminId, adminPrefixFor } = require('./config/facilities');
 const { runWithFacility, runUnscoped } = require('./models/plugins/facilityScope');
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -100,6 +100,24 @@ const validate = (list) => {
       errors.push(`${at}: facility must be one of ${FACILITY_KEYS.join(' | ')} (got ${JSON.stringify(a.facility)})`);
     }
 
+    // The id prefix IS the facility at login (config/facilities.js
+    // facilityForAdminId), so a mismatch here would mean the seeded account
+    // signs in as the wrong tenant.
+    if (a.customId && isFacility(a.facility)) {
+      const fromPrefix = facilityForAdminId(a.customId);
+      if (!fromPrefix) {
+        errors.push(
+          `${at}: customId "${a.customId}" has a prefix that is not registered. ` +
+          `Known prefixes: ${FACILITY_KEYS.map((k) => adminPrefixFor(k) + '-').join(', ')}`
+        );
+      } else if (fromPrefix !== a.facility) {
+        errors.push(
+          `${at}: customId "${a.customId}" means facility ${fromPrefix}, but this entry says ` +
+          `${a.facility}. Use ${adminPrefixFor(a.facility)}-<6 digits> instead.`
+        );
+      }
+    }
+
     if (a.customId) {
       if (!ADMIN_ID_PATTERN.test(a.customId)) {
         errors.push(`${at}: customId "${a.customId}" must be 1-4 capital letters, a hyphen, then 6 digits (e.g. A-202601 or STA-202601)`);
@@ -174,7 +192,7 @@ const seedOne = async (spec) => {
       return { action: 'updated', customId: existing.customId, email };
     }
 
-    const customId = spec.customId || (await Admin.generateCustomId('Facility Admin'));
+    const customId = spec.customId || (await Admin.generateCustomId('Facility Admin', spec.facility));
     const created = await Admin.create({ ...fields, customId });
     return { action: 'created', customId: created.customId, email };
   });

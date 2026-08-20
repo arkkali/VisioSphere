@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const facilityScope = require('./plugins/facilityScope');
+const { currentFacility } = facilityScope;
+const { adminPrefixFor } = require('../config/facilities');
 const adminSchema = new mongoose.Schema({
   customId:      { type: String, unique: true },
   name:          { type: String, required: true },
@@ -22,19 +24,44 @@ const adminSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-adminSchema.statics.generateCustomId = async function (role) {
+/**
+ * @param {string} role      'Facility Admin' | 'Nurse' | 'Guardian'
+ * @param {string} [facility] REQUIRED for 'Facility Admin'. Chooses the id
+ *   prefix, which is what determines the account's facility everywhere else
+ *   (config/facilities.js facilityForAdminId). Falls back to the ambient
+ *   facility context when omitted.
+ *
+ * Previously this always produced `A-<year><nn>` for admins, so an admin
+ * created for Saint Anthony through the app would have been handed a Graces
+ * id and silently treated as a Graces account.
+ */
+adminSchema.statics.generateCustomId = async function (role, facility) {
   const currentYear = new Date().getFullYear();
   let prefix = '';
 
   if (role === 'Nurse')          prefix = `N-${currentYear}`;
   else if (role === 'Guardian')  prefix = `G-${currentYear}`;
-  else if (role === 'Facility Admin') prefix = `A-${currentYear}`;
+  else if (role === 'Facility Admin') {
+    const key = facility || currentFacility();
+    const adminPrefix = adminPrefixFor(key);
+    if (!adminPrefix) {
+      throw new Error(
+        `[Admin.generateCustomId] Cannot mint an admin id without a known facility ` +
+        `(got ${JSON.stringify(key)}). The id prefix IS the facility, so guessing ` +
+        `one would put the account in the wrong tenant.`
+      );
+    }
+    prefix = `${adminPrefix}-${currentYear}`;
+  }
 
   if (prefix) {
-    const lastUser = await this.findOne({
+    // Unscoped deliberately: for admins the prefix already pins the facility,
+    // and for N-/G- ids the counter is shared across facilities by design (it
+    // only has to produce a unique id, not a tenant-specific one).
+    const lastUser = await facilityScope.runUnscoped(async () => this.findOne({
       role,
       customId: { $regex: `^${prefix}` },
-    }).sort({ createdAt: -1 });
+    }).sort({ createdAt: -1 }));
 
     let nextNumber = 1;
     if (lastUser && lastUser.customId) {

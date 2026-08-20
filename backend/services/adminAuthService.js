@@ -2,10 +2,35 @@ const bcryptjs = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
 const Admin = require('../models/Admin');
+const { facilityForAdminId } = require('../config/facilities');
 const AuditLog = require('../models/AuditLog');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+
+/**
+ * The admin's facility, derived from their id prefix — A-****** is Grace's
+ * Home, STA-****** is Saint Anthony. Nobody selects or types this; it is read
+ * off the id they already sign in with.
+ *
+ * The stored `facility` field is only a fallback for ids whose prefix is not
+ * registered in config/facilities.js. A disagreement between the two means the
+ * account was created with a mismatched prefix, so we say so loudly rather
+ * than silently picking one.
+ */
+const resolveFacility = (admin) => {
+  const fromPrefix = facilityForAdminId(admin.customId);
+
+  if (fromPrefix && admin.facility && fromPrefix !== admin.facility) {
+    console.warn(
+      `[facility] ${admin.customId} has prefix facility ${fromPrefix} but stored facility ` +
+      `${admin.facility}. Trusting the prefix. Fix the record or the prefix map.`
+    );
+  }
+
+  return fromPrefix || admin.facility || null;
+};
 
 const throwError = (message, status) => {
   const err = new Error(message);
@@ -45,7 +70,7 @@ exports.login = async (customId, password) => {
       isFirstLogin: true,
       customId: admin.customId,
       tempToken: jwt.sign(
-        { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: admin.facility },
+        { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: resolveFacility(admin) },
         JWT_SECRET,
         { expiresIn: '15m' }
       ),
@@ -86,7 +111,7 @@ exports.login = async (customId, password) => {
   }
 
   const token = jwt.sign(
-    { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: admin.facility },
+    { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: resolveFacility(admin) },
     JWT_SECRET,
     { expiresIn: '24h' }
   );
@@ -120,7 +145,7 @@ exports.verify2FA = async (customId, pin) => {
   }
 
   const token = jwt.sign(
-    { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: admin.facility },
+    { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: resolveFacility(admin) },
     JWT_SECRET,
     { expiresIn: '24h' }
   );
