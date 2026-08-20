@@ -12,7 +12,7 @@ import AlertsChartWidget from '../components/dashboard/AlertsChartWidget';
 import WeekDetailModal from '../components/dashboard/WeekDetailModal';
 import AlertHistoryModal from '../components/dashboard/AlertHistoryModal';
 import dashboardService from '../services/dashboardService';
-import { ACTIVE_CAMERA_COUNT, TOTAL_CAMERA_COUNT } from '../constants/cameras';
+import { activeCameraCount, totalCameraCount } from '../constants/cameras';
 import { isNurseId, isAdminId } from '../constants/idRoles';
 
 const incidentTypeToCategory = (incidentType) => {
@@ -49,11 +49,13 @@ const sundayOfWeek = (d = new Date()) => {
 
 const DEFAULT_STAT        = { current: 0, diff: 0, direction: 'neutral', label: 'No changes since last month' };
 const DEFAULT_ALERT_STAT  = { current: 0, diff: 0, direction: 'neutral', label: 'No changes since yesterday' };
-const DEFAULT_CAMERA_STAT = {
-  online: ACTIVE_CAMERA_COUNT,
-  total: TOTAL_CAMERA_COUNT,
-  label: `${ACTIVE_CAMERA_COUNT} / ${TOTAL_CAMERA_COUNT} online`,
-  direction: 'none',
+// Lazy: this module is imported at app start, before login writes the
+// facility, so evaluating the camera counts here as constants would freeze
+// them at 0/0 for the whole session.
+const defaultCameraStat = () => {
+  const online = activeCameraCount();
+  const total  = totalCameraCount();
+  return { online, total, label: `${online} / ${total} online`, direction: 'none' };
 };
 
 const AdminDashboard = () => {
@@ -77,7 +79,7 @@ const AdminDashboard = () => {
     elders:  DEFAULT_STAT,
     nurses:  DEFAULT_STAT,
     alerts:  DEFAULT_ALERT_STAT,
-    cameras: DEFAULT_CAMERA_STAT,
+    cameras: defaultCameraStat(),
   });
   const [statsLoading, setStatsLoading] = useState(true);
   const [loading,      setLoading]      = useState(true);
@@ -428,7 +430,7 @@ const AdminDashboard = () => {
   const closeWeekDetail = () => { setSelectedWeek(null); setSelectedWeekData(null); };
 
   const formattedAlerts  = String(statsData.alerts.current  ?? 0).padStart(2, '0');
-  const formattedCameras = String(statsData.cameras.online  ?? ACTIVE_CAMERA_COUNT).padStart(2, '0');
+  const formattedCameras = String(statsData.cameras.online  ?? activeCameraCount()).padStart(2, '0');
 
   return (
     <>

@@ -9,7 +9,7 @@ import ToastNotification from '../components/cctv/ToastNotification';
 import DebugPanel from '../components/cctv/DebugPanel';
 import { resolveAlertMeta } from '../components/cctv/alertMeta';
 import { dismissIncident, resolveIncident } from '../services/cctvService';
-import { CAMERAS, ACTIVE_CAMERA_COUNT, TOTAL_CAMERA_COUNT } from '../constants/cameras';
+import { camerasForCurrentUser, activeCameraCount, totalCameraCount } from '../constants/cameras';
 import { useAlertSound } from '../hooks/useAlertSound';
 import { useAlerts } from '../context/AlertContext';
 
@@ -54,6 +54,12 @@ const CCTVAnalytics = () => {
   const [resolveTarget,     setResolveTarget]     = useState(null);
   const [isResolving,       setIsResolving]       = useState(false);
   const toastTimeouts = useRef(new Map());
+
+  // Cameras belong to a facility. Resolved here rather than at module scope,
+  // because this file is imported before login writes the facility.
+  const CAMERAS      = useMemo(() => camerasForCurrentUser(), []);
+  const activeCount  = useMemo(() => activeCameraCount(CAMERAS), [CAMERAS]);
+  const totalCount   = useMemo(() => totalCameraCount(CAMERAS), [CAMERAS]);
 
   const { playAlertSound }                        = useAlertSound();
 const { alerts: contextAlerts,
@@ -219,7 +225,7 @@ const { alerts: contextAlerts,
                   </div>
                 ))}
               </div>
-              <StatItem label="Active Cameras" value={`${ACTIVE_CAMERA_COUNT}/${TOTAL_CAMERA_COUNT}`} />
+              <StatItem label="Active Cameras" value={`${activeCount}/${totalCount}`} />
               <StatItem label="Unresolved"     value={unresolvedCount} variant="alert" />
               <button
                 onClick={() => setShowDebug(p => !p)}
