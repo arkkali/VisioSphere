@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import axios from 'axios';
 import axiosInstance from '../api/axiosInstance';
@@ -12,7 +12,8 @@ import AlertsChartWidget from '../components/dashboard/AlertsChartWidget';
 import WeekDetailModal from '../components/dashboard/WeekDetailModal';
 import AlertHistoryModal from '../components/dashboard/AlertHistoryModal';
 import dashboardService from '../services/dashboardService';
-import { activeCameraCount, totalCameraCount } from '../constants/cameras';
+import { camerasForCurrentUser, withLiveStatus, activeCameraCount, totalCameraCount } from '../constants/cameras';
+import { useCameraHealth } from '../hooks/useCameraHealth';
 import { isNurseId, isAdminId } from '../constants/idRoles';
 
 const incidentTypeToCategory = (incidentType) => {
@@ -52,13 +53,25 @@ const DEFAULT_ALERT_STAT  = { current: 0, diff: 0, direction: 'neutral', label: 
 // Lazy: this module is imported at app start, before login writes the
 // facility, so evaluating the camera counts here as constants would freeze
 // them at 0/0 for the whole session.
+// Starts at 0 online: until ai_core has actually answered, we must not claim
+// a camera is watching anyone. useCameraHealth replaces this within a second.
 const defaultCameraStat = () => {
-  const online = activeCameraCount();
-  const total  = totalCameraCount();
-  return { online, total, label: `${online} / ${total} online`, direction: 'none' };
+  const total = totalCameraCount();
+  return { online: 0, total, label: `0 / ${total} online`, direction: 'none' };
 };
 
 const AdminDashboard = () => {
+  // Camera liveness is polled from ai_core, not taken from the API response —
+  // adminService.getStats() returns a hardcoded { online: 2, total: 2 }, which
+  // claimed two cameras were watching residents with nothing plugged in.
+  const cameraHealth  = useCameraHealth();
+  const liveCameras   = useMemo(
+    () => withLiveStatus(camerasForCurrentUser(), cameraHealth),
+    [cameraHealth]
+  );
+  const camerasOnline = activeCameraCount(liveCameras);
+  const camerasTotal  = totalCameraCount();
+
   const { theme } = useTheme();
   const isDark = theme === 'dark' || (theme === 'default' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const location    = useLocation();
@@ -430,7 +443,17 @@ const AdminDashboard = () => {
   const closeWeekDetail = () => { setSelectedWeek(null); setSelectedWeekData(null); };
 
   const formattedAlerts  = String(statsData.alerts.current  ?? 0).padStart(2, '0');
-  const formattedCameras = String(statsData.cameras.online  ?? activeCameraCount()).padStart(2, '0');
+  // Live count wins over whatever the API reported.
+  const formattedCameras = String(camerasOnline).padStart(2, '0');
+  const cameraStat = {
+    ...statsData.cameras,
+    online: camerasOnline,
+    total:  camerasTotal,
+    label:  cameraHealth.reachable === false
+      ? 'AI core unreachable'
+      : `${camerasOnline} / ${camerasTotal} online`,
+    direction: 'none',
+  };
 
   return (
     <>
@@ -545,7 +568,7 @@ const AdminDashboard = () => {
                 <div className="dashboard-row dashboard-row-stats shrink-0">
                   <BentoStatCard title="Total Elders"   value={statsLoading ? '—' : String(statsData.elders.current).padStart(2, '0')}  statData={statsData.elders}  isDark={isDark} bgColor="bg-[#00a8e8] dark:bg-[#00435c]"     primaryColor="text-white dark:text-[#ccedfa]"       compact icon={<svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>} />
                   <BentoStatCard title="Active Nurses"  value={statsLoading ? '—' : String(statsData.nurses.current).padStart(2, '0')}  statData={statsData.nurses}  isDark={isDark} bgColor="bg-[#e1f5fe] dark:bg-[#00212e]"     primaryColor="text-[#0075a2] dark:text-[#4cc2ee]"  compact icon={<svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>} />
-                  <BentoStatCard title="Cameras Online" value={statsLoading ? '—' : formattedCameras}                                   statData={statsData.cameras} isDark={isDark} bgColor="bg-[#e8f8fb] dark:bg-[#1c2c2f]"     primaryColor="text-[#649ca7] dark:text-[#b1e9f3]"  compact icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-5 h-5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>} />
+                  <BentoStatCard title="Cameras Online" value={statsLoading ? '—' : formattedCameras}                                   statData={cameraStat} isDark={isDark} bgColor="bg-[#e8f8fb] dark:bg-[#1c2c2f]"     primaryColor="text-[#649ca7] dark:text-[#b1e9f3]"  compact icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-5 h-5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>} />
                   <BentoStatCard title="Alerts Today"   value={statsLoading ? '—' : formattedAlerts}                                    statData={statsData.alerts}  isDark={isDark} bgColor="bg-[#fff1f2] dark:bg-[#ff4757]/10" primaryColor="text-[#e11d48] dark:text-[#ff4757]"   compact icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-5 h-5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>} />
                 </div>
 

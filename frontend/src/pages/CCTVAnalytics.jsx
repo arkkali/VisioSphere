@@ -9,7 +9,8 @@ import ToastNotification from '../components/cctv/ToastNotification';
 import DebugPanel from '../components/cctv/DebugPanel';
 import { resolveAlertMeta } from '../components/cctv/alertMeta';
 import { dismissIncident, resolveIncident } from '../services/cctvService';
-import { camerasForCurrentUser, activeCameraCount, totalCameraCount } from '../constants/cameras';
+import { camerasForCurrentUser, withLiveStatus, activeCameraCount, totalCameraCount } from '../constants/cameras';
+import { useCameraHealth } from '../hooks/useCameraHealth';
 import { useAlertSound } from '../hooks/useAlertSound';
 import { useAlerts } from '../context/AlertContext';
 
@@ -57,9 +58,12 @@ const CCTVAnalytics = () => {
 
   // Cameras belong to a facility. Resolved here rather than at module scope,
   // because this file is imported before login writes the facility.
-  const CAMERAS      = useMemo(() => camerasForCurrentUser(), []);
+  const baseCameras  = useMemo(() => camerasForCurrentUser(), []);
+  // Active/Inactive is LIVE — polled from ai_core, not read off a constant.
+  const health       = useCameraHealth();
+  const CAMERAS      = useMemo(() => withLiveStatus(baseCameras, health), [baseCameras, health]);
   const activeCount  = useMemo(() => activeCameraCount(CAMERAS), [CAMERAS]);
-  const totalCount   = useMemo(() => totalCameraCount(CAMERAS), [CAMERAS]);
+  const totalCount   = useMemo(() => totalCameraCount(baseCameras), [baseCameras]);
 
   const { playAlertSound }                        = useAlertSound();
 const { alerts: contextAlerts,
