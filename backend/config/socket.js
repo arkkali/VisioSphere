@@ -120,7 +120,8 @@ const initSocket = (server) => {
       if (saved) {
         // Scoped too: this reads Admin + Nurse to pick push targets, and would
         // otherwise notify the other facility's staff phones.
-        runWithFacility(facility, () => dispatchIncidentPushToStaff(saved));
+        runWithFacility(facility, () => dispatchIncidentPushToStaff(saved))
+          .catch((err) => console.error('[Incident] push dispatch failed:', err.message));
       }
 
       io.to(roomFor(facility)).emit('dashboard_alert', saved ? {
@@ -152,7 +153,9 @@ const initSocket = (server) => {
       const facility = facilityForCamera(location);
 
       try {
-        const updated = await runWithFacility(facility, () => Incident.findOneAndUpdate(
+        // await INSIDE the context: a Mongoose Query is lazy, so returning it
+        // unexecuted would run exec() after the context was torn down.
+        const updated = await runWithFacility(facility, async () => Incident.findOneAndUpdate(
           { alertKey },
           { $set: { clipPath } },
           { returnDocument: 'after' }

@@ -119,7 +119,7 @@ const seedOne = async (spec) => {
   // Deliberately unscoped: Admin.email and Admin.customId are globally unique,
   // so a clash with the OTHER facility's admin must still be detected here
   // rather than surfacing as a duplicate-key error at insert time.
-  const existing = await runUnscoped(() => Admin.findOne({
+  const existing = await runUnscoped(async () => Admin.findOne({
     $or: [{ email }, ...(spec.customId ? [{ customId: spec.customId }] : [])],
   }));
 

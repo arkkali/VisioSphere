@@ -71,6 +71,34 @@ const QUERY_MIDDLEWARE = { document: false, query: true };
 
 const getContext = () => storage.getStore();
 
+/**
+ * Run `fn` inside `store`, making sure a lazily-executed return value is
+ * resolved WHILE the context is still active.
+ *
+ * This matters because a Mongoose Query is lazy. Given:
+ *
+ *     const q = runUnscoped(() => Admin.findOne({ email }));
+ *     await q;
+ *
+ * the query is *built* inside the context but not executed; storage.run()
+ * returns it unexecuted, and the caller's await fires exec() after the context
+ * has already been torn down — so the scoping hooks see nothing and (correctly)
+ * fail closed. Calling .then() synchronously here starts execution while we are
+ * still inside run(), so the hooks observe the intended context.
+ *
+ * Callers should still prefer `async () => { await ... }`, which is explicit;
+ * this makes the terser `() => Model.find(...)` form safe rather than silently
+ * wrong.
+ */
+const runInContext = (store, fn) =>
+  storage.run(store, () => {
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      return new Promise((resolve, reject) => result.then(resolve, reject));
+    }
+    return result;
+  });
+
 /** Run `fn` scoped to one facility. */
 const runWithFacility = (facility, fn) => {
   if (!isFacility(facility)) {
@@ -78,14 +106,14 @@ const runWithFacility = (facility, fn) => {
       `[facilityScope] "${facility}" is not a known facility. Expected one of: ${FACILITY_KEYS.join(', ')}`
     );
   }
-  return storage.run({ facility, unscoped: false }, fn);
+  return runInContext({ facility, unscoped: false }, fn);
 };
 
 /**
  * Run `fn` across ALL facilities. Every call site is a deliberate decision to
  * cross the tenant boundary — keep them few and keep them auditable.
  */
-const runUnscoped = (fn) => storage.run({ facility: null, unscoped: true }, fn);
+const runUnscoped = (fn) => runInContext({ facility: null, unscoped: true }, fn);
 
 const currentFacility = () => {
   const ctx = getContext();
