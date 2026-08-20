@@ -6,6 +6,23 @@ import visioSphereLogo from '../assets/visioSphereLogo.png';
 import matandaAnime from '../assets/MatandaAnime.png';
 import { useTheme } from '../context/ThemeContext';
 
+/**
+ * Pull the `facility` claim out of a JWT payload.
+ *
+ * Returns '' when the claim is absent (a token minted before facility
+ * separation) — housesForCurrentUser() then yields an empty list, which is an
+ * obvious, reportable bug rather than a silent fallback to every house.
+ * JWTs are base64url, so the alphabet must be translated before atob().
+ */
+const facilityFromToken = (token) => {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(payload)).facility || '';
+  } catch {
+    return '';
+  }
+};
+
 const UserIcon = () => (
   <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -196,6 +213,10 @@ const Login = () => {
 
         setFailedAttempts(0);
         localStorage.setItem('token', data.token);
+        // Facility is read out of the JWT rather than the response body, so the
+        // client can never disagree with what the backend enforces. Drives the
+        // house dropdowns in constants/houses.js.
+        localStorage.setItem('facility', facilityFromToken(data.token));
 
         let userName = '';
         let userRole = '';
@@ -317,6 +338,10 @@ const Login = () => {
         }
 
         localStorage.setItem('token', data.token);
+        // Facility is read out of the JWT rather than the response body, so the
+        // client can never disagree with what the backend enforces. Drives the
+        // house dropdowns in constants/houses.js.
+        localStorage.setItem('facility', facilityFromToken(data.token));
 
         const userData = data.nurse || data.admin || {};
         const userTheme = userData.theme || 'default';

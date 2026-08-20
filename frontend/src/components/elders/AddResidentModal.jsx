@@ -1,13 +1,5 @@
 import React from 'react';
-
-const HOUSES = [
-  'House of St. Charbel',
-  'House of St. Francis',
-  'House of St. Gabriel',
-  'House of St. Rose of Lima',
-  'House of St. Sebastian',
-  'Louis S. Coson Hall',
-];
+import { housesForCurrentUser } from '../../constants/houses';
 
 const AddResidentModal = ({ newResident, setNewResident, onSave, onClose }) => {
   return (
@@ -73,7 +65,7 @@ const AddResidentModal = ({ newResident, setNewResident, onSave, onClose }) => {
               onChange={(e) => setNewResident({ ...newResident, house: e.target.value })}
               className="w-full p-[14px] bg-white dark:bg-slate-900 border-[1.5px] border-[#cbd5e1] dark:border-slate-600 rounded-[8px] text-[0.95rem] font-bold text-[#00212e] dark:text-white focus:outline-none focus:border-[#00a8e8] dark:focus:border-[#38bdf8] focus:shadow-[0_0_0_3px_rgba(0,168,232,0.15)] transition-all cursor-pointer appearance-none bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%2300a8e8%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%2338bdf8%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] bg-no-repeat bg-[right_14px_center]"
             >
-              {HOUSES.map((house) => (
+              {housesForCurrentUser().map((house) => (
                 <option key={house} value={house}>{house}</option>
               ))}
             </select>
