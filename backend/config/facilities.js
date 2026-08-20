@@ -8,13 +8,14 @@
  * HOW A RECORD GETS ITS FACILITY — nobody ever types or selects it.
  *
  *   Admins    the id prefix IS the facility. A-****** is Graces, STA-****** is
- *             Saint Anthony (ADMIN_PREFIX_FACILITY below). Resolved at login
- *             from the id the admin already signs in with.
+ *             Saint Anthony. Resolved at login from the id they already type.
  *
- *   Everyone  nurses (N-), guardians (G-) and residents (E-) use prefixes that
- *   else      encode ROLE and are identical at both facilities — there is no
- *             facility signal in those ids to read. They instead inherit the
- *             facility of the admin who creates them, stamped automatically at
+ *   Nurses &  the prefix carries facility AND role:
+ *   guardians   Graces         N-  nurse    G-  guardian
+ *               Saint Anthony  STN nurse    STG guardian
+ *
+ *   Residents still share the 'E-' prefix across both facilities, so their
+ *             tenancy comes from the `facility` field, stamped automatically at
  *             insert time by models/plugins/facilityScope.js.
  *
  *   Incidents from the camera that raised them (CAMERA_FACILITY below).
@@ -29,9 +30,9 @@ const FACILITIES = {
     key: 'GRACES',
     name: "Grace's Home for the Aged",
     shortName: 'Graces',
-    // Prefix used when seeding admin ids for this facility. Purely cosmetic —
-    // nothing derives tenancy from it. See the note above.
-    adminIdPrefix: 'A',
+    // Id prefixes per role. The prefix identifies BOTH the facility and the
+    // role, so no record needs to be asked which facility it belongs to.
+    idPrefixes: { admin: 'A', nurse: 'N', guardian: 'G', resident: 'E' },
     // Exactly the list currently hardcoded in the four Add/Edit modals —
     // including 'Louis S. Coson Hall', which does not start with "House of".
     houses: [
@@ -47,7 +48,13 @@ const FACILITIES = {
     key: 'SAINT_ANTHONY',
     name: 'Saint Anthony de Padua Home Care Center',
     shortName: 'Saint Anthony',
-    adminIdPrefix: 'STA',
+    // STA = Saint Anthony Admin, STN = Saint Anthony Nurse,
+    // STG = Saint Anthony Guardian.
+    // NOTE: residents still use the shared 'E-' prefix at both facilities —
+    // that was not part of the request. Their ids stay unique because the
+    // generators scan unscoped; tenancy still comes from the `facility` field.
+    // Say the word if you want STE- as well.
+    idPrefixes: { admin: 'STA', nurse: 'STN', guardian: 'STG', resident: 'E' },
     houses: [
       'House of Saint Anthony',
     ],
@@ -90,13 +97,38 @@ const CAMERA_FACILITY = {
  * sign in with. Built from FACILITIES so a new facility only has to be
  * declared once, above.
  *
- * Only ADMIN ids carry a facility. Nurse (N-), Guardian (G-) and Resident (E-)
- * prefixes encode role and are shared by both facilities, so those records
- * inherit the facility of the admin who creates them — see
- * models/plugins/facilityScope.js, which stamps it at insert time.
+ * Nurse and guardian prefixes are facility-specific too (STN-, STG-). Only the
+ * resident prefix ('E-') is still shared between facilities.
  */
-const ADMIN_PREFIX_FACILITY = FACILITY_KEYS.reduce((map, key) => {
-  map[FACILITIES[key].adminIdPrefix.toUpperCase()] = key;
+const ROLES = ['admin', 'nurse', 'guardian', 'resident'];
+
+/**
+ * prefix → { facility, role }, built from FACILITIES so a new facility is
+ * declared in exactly one place.
+ *
+ * A prefix used by BOTH facilities (currently only 'E' for residents) resolves
+ * to facility: null — it identifies the role but carries no tenancy, so
+ * callers must fall back to the record's `facility` field.
+ */
+const PREFIX_INDEX = (() => {
+  const index = {};
+  for (const key of FACILITY_KEYS) {
+    for (const role of ROLES) {
+      const prefix = (FACILITIES[key].idPrefixes?.[role] || '').toUpperCase();
+      if (!prefix) continue;
+      if (index[prefix] && index[prefix].facility !== key) {
+        index[prefix] = { facility: null, role, shared: true };  // used by both
+      } else {
+        index[prefix] = { facility: key, role, shared: false };
+      }
+    }
+  }
+  return index;
+})();
+
+/** Back-compat: admin prefix → facility. */
+const ADMIN_PREFIX_FACILITY = Object.entries(PREFIX_INDEX).reduce((map, [prefix, meta]) => {
+  if (meta.role === 'admin' && meta.facility) map[prefix] = meta.facility;
   return map;
 }, {});
 
@@ -107,13 +139,39 @@ const isFacility = (value) => FACILITY_KEYS.includes(value);
  * prefix is not registered — callers must treat that as "unknown", never as a
  * default, or an unregistered prefix would silently land in one tenant.
  */
-const facilityForAdminId = (customId) => {
-  const match = String(customId ?? '').trim().toUpperCase().match(/^([A-Z]{1,4})-\d{6}$/);
-  return match ? (ADMIN_PREFIX_FACILITY[match[1]] || null) : null;
+const parsePrefix = (id) => {
+  const match = String(id ?? '').trim().toUpperCase().match(/^([A-Z]{1,4})-/);
+  return match ? match[1] : null;
 };
 
-/** The id prefix a newly generated admin id should use for this facility. */
-const adminPrefixFor = (facilityKey) => FACILITIES[facilityKey]?.adminIdPrefix || null;
+/**
+ * What an id tells us: { prefix, facility, role }, or null if unrecognised.
+ * facility is null for prefixes shared by both facilities.
+ */
+const describeId = (id) => {
+  const prefix = parsePrefix(id);
+  if (!prefix) return null;
+  const meta = PREFIX_INDEX[prefix];
+  return meta ? { prefix, facility: meta.facility, role: meta.role, shared: meta.shared } : null;
+};
+
+/** Facility implied by any id, or null when the prefix is shared/unknown. */
+const facilityForId = (id) => describeId(id)?.facility || null;
+
+/** Facility for an ADMIN id specifically (used at login). */
+const facilityForAdminId = (customId) => {
+  const meta = describeId(customId);
+  return meta && meta.role === 'admin' ? meta.facility : null;
+};
+
+/** Role implied by an id prefix: 'admin' | 'nurse' | 'guardian' | 'resident'. */
+const roleForId = (id) => describeId(id)?.role || null;
+
+/** The id prefix a new record of `role` at `facilityKey` should use. */
+const idPrefixFor = (facilityKey, role) => FACILITIES[facilityKey]?.idPrefixes?.[role] || null;
+
+/** Back-compat alias. */
+const adminPrefixFor = (facilityKey) => idPrefixFor(facilityKey, 'admin');
 
 const facilityForCamera = (cameraId) => {
   const match = CAMERA_FACILITY[cameraId];
@@ -136,8 +194,14 @@ module.exports = {
   DEFAULT_FACILITY,
   CAMERA_FACILITY,
   ADMIN_PREFIX_FACILITY,
+  PREFIX_INDEX,
+  ROLES,
   isFacility,
+  describeId,
+  facilityForId,
   facilityForAdminId,
+  roleForId,
+  idPrefixFor,
   adminPrefixFor,
   facilityForCamera,
   housesFor,

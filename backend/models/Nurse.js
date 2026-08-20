@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const facilityScope = require('./plugins/facilityScope');
+const { currentFacility } = facilityScope;
+const { idPrefixFor } = require('../config/facilities');
 const bcrypt   = require('bcryptjs');
 
 const nurseSchema = new mongoose.Schema({
@@ -58,12 +60,26 @@ nurseSchema.methods.comparePassword = async function (enteredPassword) {
   return bcrypt.compare(enteredPassword, this.password);
 };
 
-nurseSchema.statics.generateNurseId = async function () {
+/**
+ * @param {string} [facility] Defaults to the ambient facility context.
+ *   The prefix encodes facility AND role (nurse): Graces uses the short
+ *   form, Saint Anthony uses ST*. See config/facilities.js idPrefixes.
+ */
+nurseSchema.statics.generateNurseId = async function (facility) {
+  const key = facility || currentFacility();
+  const rolePrefix = idPrefixFor(key, 'nurse');
+  if (!rolePrefix) {
+    throw new Error(
+      `[generateNurseId] Cannot mint a nurse id without a known facility (got ` +
+      `${JSON.stringify(key)}). The prefix encodes the facility, so guessing would ` +
+      `put the record in the wrong tenant.`
+    );
+  }
   const currentYear = new Date().getFullYear();
-  const prefix      = `N-${currentYear}`;
-  const lastNurse   = await this.findOne({
+  const prefix      = `${rolePrefix}-${currentYear}`;
+  const lastNurse   = await facilityScope.runUnscoped(async () => this.findOne({
     nurseId: { $regex: `^${prefix}` },
-  }).sort({ createdAt: -1 });
+  }).sort({ createdAt: -1 }));
 
   let nextNumber = 1;
   if (lastNurse && lastNurse.nurseId) {

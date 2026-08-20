@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const facilityScope = require('./plugins/facilityScope');
 const { currentFacility } = facilityScope;
-const { adminPrefixFor } = require('../config/facilities');
+const { idPrefixFor } = require('../config/facilities');
 const adminSchema = new mongoose.Schema({
   customId:      { type: String, unique: true },
   name:          { type: String, required: true },
@@ -39,19 +39,20 @@ adminSchema.statics.generateCustomId = async function (role, facility) {
   const currentYear = new Date().getFullYear();
   let prefix = '';
 
-  if (role === 'Nurse')          prefix = `N-${currentYear}`;
-  else if (role === 'Guardian')  prefix = `G-${currentYear}`;
-  else if (role === 'Facility Admin') {
+  const ROLE_KEY = { 'Nurse': 'nurse', 'Guardian': 'guardian', 'Facility Admin': 'admin' };
+  const roleKey = ROLE_KEY[role];
+
+  if (roleKey) {
     const key = facility || currentFacility();
-    const adminPrefix = adminPrefixFor(key);
-    if (!adminPrefix) {
+    const rolePrefix = idPrefixFor(key, roleKey);
+    if (!rolePrefix) {
       throw new Error(
-        `[Admin.generateCustomId] Cannot mint an admin id without a known facility ` +
+        `[Admin.generateCustomId] Cannot mint a ${roleKey} id without a known facility ` +
         `(got ${JSON.stringify(key)}). The id prefix IS the facility, so guessing ` +
         `one would put the account in the wrong tenant.`
       );
     }
-    prefix = `${adminPrefix}-${currentYear}`;
+    prefix = `${rolePrefix}-${currentYear}`;
   }
 
   if (prefix) {

@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const facilityScope = require('./plugins/facilityScope');
+const { currentFacility } = facilityScope;
+const { idPrefixFor } = require('../config/facilities');
 const bcrypt = require('bcryptjs');
 
 const guardianSchema = new mongoose.Schema({
@@ -59,13 +61,27 @@ guardianSchema.methods.comparePassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-guardianSchema.statics.generateGuardianId = async function () {
+/**
+ * @param {string} [facility] Defaults to the ambient facility context.
+ *   The prefix encodes facility AND role (guardian): Graces uses the short
+ *   form, Saint Anthony uses ST*. See config/facilities.js idPrefixes.
+ */
+guardianSchema.statics.generateGuardianId = async function (facility) {
+  const key = facility || currentFacility();
+  const rolePrefix = idPrefixFor(key, 'guardian');
+  if (!rolePrefix) {
+    throw new Error(
+      `[generateGuardianId] Cannot mint a guardian id without a known facility (got ` +
+      `${JSON.stringify(key)}). The prefix encodes the facility, so guessing would ` +
+      `put the record in the wrong tenant.`
+    );
+  }
   const currentYear = new Date().getFullYear();
-  const prefix = `G-${currentYear}`;
+  const prefix = `${rolePrefix}-${currentYear}`;
 
-  const lastGuardian = await this.findOne({
+  const lastGuardian = await facilityScope.runUnscoped(async () => this.findOne({
     guardianId: { $regex: `^${prefix}` }
-  }).sort({ createdAt: -1 });
+  }).sort({ createdAt: -1 }));
 
   let nextNumber = 1;
   if (lastGuardian && lastGuardian.guardianId) {

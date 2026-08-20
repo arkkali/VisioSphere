@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const facilityScope = require('./plugins/facilityScope');
+const { idPrefixFor } = require('../config/facilities');
 const residentSchema = new mongoose.Schema(
   {
     residentId: {
@@ -80,10 +81,13 @@ residentSchema.statics.generateResidentId = async function () {
   const month = String(currentDate.getMonth() + 1).padStart(2, '0');
   const prefix = `E-${year}${month}`;
 
+  // Unscoped: residents share the 'E-' prefix across facilities, and
+  // residentId is globally unique — a scoped scan would only see this
+  // facility's residents and mint an id the other facility already holds.
   for (let attempt = 0; attempt < 10; attempt++) {
-    const lastResident = await this.findOne({
+    const lastResident = await facilityScope.runUnscoped(async () => this.findOne({
       residentId: { $regex: `^${prefix}` },
-    }).sort({ residentId: -1 });
+    }).sort({ residentId: -1 }));
 
     let nextNumber = 1;
     if (lastResident && lastResident.residentId) {
@@ -95,7 +99,7 @@ residentSchema.statics.generateResidentId = async function () {
     }
 
     const candidateId = `${prefix}${nextNumber.toString().padStart(2, '0')}`;
-    const exists = await this.findOne({ residentId: candidateId });
+    const exists = await facilityScope.runUnscoped(async () => this.findOne({ residentId: candidateId }));
     if (!exists) {
       return candidateId;
     }
