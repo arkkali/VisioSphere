@@ -7,36 +7,37 @@ const STREAM_TOKEN = import.meta.env.VITE_STREAM_TOKEN || '';
 const feed = (cam) => `${STREAM_BASE_URL}/${cam}${STREAM_TOKEN ? `?key=${STREAM_TOKEN}` : ''}`;
 
 /**
- * Cameras per facility.
+ * Cameras per facility — now FULLY separated.
  *
- * Camera ACCESS is deliberately NOT separated yet — there is only one physical
- * camera rig, so Saint Anthony's "Living Room" tile streams the same ai_core
- * feed as Graces' "House of Gabriel". What IS separated is the naming: Saint
- * Anthony staff should never see Graces' house names in their source list.
+ * Each facility has its own physical rig, its own ai_core feed, and therefore
+ * its own detections and its own alerts:
  *
- * ⚠ Because the feed is shared, a Saint Anthony viewer is watching a camera
- * that physically sits in a Graces house, and any alert it raises is still
- * attributed to Graces (ai_core reports location as "House of Gabriel", which
- * backend/config/facilities.js maps to GRACES). That is a deliberate interim
- * state, not an oversight.
+ *   Saint Anthony  Living Room  ->  ai_core cam_id "Living Room"   (deployed)
+ *   Graces         —            ->  no camera on site yet
  *
- * WHEN A REAL SAINT ANTHONY CAMERA IS INSTALLED:
- *   1. Add it to ai_core (CAM_2_ID=Living Room, CAM_2_SOURCE=<rtsp url>).
- *   2. Point the url below at feed('Living%20Room').
- *   3. 'Living Room' is already registered in backend CAMERA_FACILITY, so its
- *      incidents will be attributed to Saint Anthony automatically.
+ * `feedId` is the ai_core cam_id backing a tile. It drives BOTH the live
+ * stream URL and the Active/Inactive badge (see withLiveStatus). A tile with
+ * feedId: null is a placeholder — no stream, always Inactive.
+ *
+ * A camera's facility comes from backend/config/facilities.js CAMERA_FACILITY,
+ * keyed on that same cam_id. That mapping is what routes an alert to the right
+ * facility's dashboard, socket room, and staff push notifications — so a new
+ * camera must be added in THREE places: ai_core/.env (CAM_<n>_*), the backend
+ * CAMERA_FACILITY map, and this file.
  */
 export const FACILITY_CAMERAS = {
+  // Graces is not deployed yet — no camera on site, so every tile is a
+  // placeholder. When a rig is installed: add a CAM_<n> slot in ai_core/.env,
+  // then set feedId + url here to match its cam_id.
   GRACES: [
-    // Listed first: this is the only rig actually installed and streaming.
     {
       cameraId: 'CAM-002',
       name: 'House of Gabriel',
-      location: 'IP Camera · CCTV',
-      feedId: 'House of Gabriel',
-      fps: 30,
+      location: 'Pending Installation',
+      feedId: null,
+      fps: 0,
       type: 'stream',
-      url: feed('House%20of%20Gabriel'),
+      url: null,
     },
     {
       cameraId: 'CAM-001',
@@ -71,13 +72,14 @@ export const FACILITY_CAMERAS = {
     {
       cameraId: 'STA-CAM-001',
       name: 'Living Room',
-      // Streams Graces' House of Gabriel rig — the only installed camera —
-      // until Saint Anthony has its own. See the note above.
-      location: 'Shared feed · Awaiting dedicated camera',
-      feedId: 'House of Gabriel',
+      location: 'IP Camera · CCTV',
+      // Saint Anthony's own rig. Requires CAM_2_ID=Living Room in ai_core/.env
+      // — until that exists the tile shows Inactive, which is correct rather
+      // than borrowing Graces' feed.
+      feedId: 'Living Room',
       fps: 30,
       type: 'stream',
-      url: feed('House%20of%20Gabriel'),
+      url: feed('Living%20Room'),
     },
     {
       cameraId: 'STA-CAM-002',
