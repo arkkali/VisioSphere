@@ -46,7 +46,10 @@ const hydrateIncident = (inc) => {
 };
 
 const CCTVAnalytics = () => {
-  const [filterModule,      setFilterModule]      = useState('All');
+  // Persisted: leaving the page and coming back used to reset the log to
+  // "All", losing whichever category the user was working through.
+  const [filterModule,      setFilterModule]      = useState(
+    () => localStorage.getItem('cctvAlertFilter') || 'All');
   const [selectedCameraId,  setSelectedCameraId]  = useState('OVERALL');
   const [realTimeStatuses,  setRealTimeStatuses]  = useState({});
   const [toasts,            setToasts]            = useState([]);
@@ -137,6 +140,19 @@ const { alerts: contextAlerts,
       // alert already removed from context — leave it removed
     }
   }, [ctxDismiss]);
+
+  const handleFilterChange = useCallback((f) => {
+    setFilterModule(f);
+    localStorage.setItem('cctvAlertFilter', f);
+  }, []);
+
+  // Dismisses everything currently visible under the active filter. Each one
+  // goes through handleDismiss so the backend records it as dismissed —
+  // clearing local state alone would bring them all back on the next fetch.
+  const handleClearAll = useCallback(async () => {
+    const ids = filteredAlerts.map(a => a._id);
+    await Promise.allSettled(ids.map(id => handleDismiss(id)));
+  }, [filteredAlerts, handleDismiss]);
 
   const handleResolveIntent = useCallback((alert) => {
     setResolveTarget(alert);
@@ -253,7 +269,8 @@ const { alerts: contextAlerts,
             <AlertSidebar
               filteredAlerts={filteredAlerts}
               filterModule={filterModule}
-              onFilterChange={setFilterModule}
+              onFilterChange={handleFilterChange}
+              onClearAll={handleClearAll}
               unresolvedCount={unresolvedCount}
               onResolveIntent={handleResolveIntent}
               onDismiss={handleDismiss}

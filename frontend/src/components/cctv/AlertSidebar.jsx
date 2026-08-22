@@ -2,15 +2,31 @@ import AlertItem from './AlertItem';
 
 const FILTERS = ['All', 'Unresolved', 'Fall', 'Agitation', 'Pacing', 'Inactivity', 'Lying Down'];
 
-const AlertSidebar = ({ filteredAlerts, filterModule, onFilterChange, unresolvedCount, onResolveIntent, onDismiss }) => (
+const AlertSidebar = ({ filteredAlerts, filterModule, onFilterChange, unresolvedCount, onResolveIntent, onDismiss, onClearAll }) => (
   <div className="w-[340px] shrink-0 bg-white dark:bg-slate-800 border border-[#e2e8f0] dark:border-slate-700 rounded-xl shadow-sm flex flex-col h-full overflow-hidden transition-colors duration-300">
     <div className="p-4 border-b border-[#e2e8f0] dark:border-slate-700 bg-white dark:bg-slate-800 shrink-0 flex justify-between items-center transition-colors duration-300">
       <h2 className="text-[11px] font-black text-[#003543] dark:text-white uppercase tracking-widest m-0">AI Analytics Log</h2>
-      {unresolvedCount > 0 && (
-        <span className="bg-[#ff4757] text-white text-[9px] font-black px-2 py-0.5 rounded-full">
-          {unresolvedCount} active
-        </span>
-      )}
+      <div className="flex items-center gap-2">
+        {unresolvedCount > 0 && (
+          <span className="bg-[#ff4757] text-white text-[9px] font-black px-2 py-0.5 rounded-full">
+            {unresolvedCount} active
+          </span>
+        )}
+        {/* Clears exactly what is on screen — the CURRENT filter's alerts, not
+            every alert. Dismissing from the "Fall" tab must not silently drop
+            unrelated inactivity alerts the user never looked at. */}
+        {onClearAll && filteredAlerts.length > 0 && (
+          <button
+            onClick={onClearAll}
+            title={filterModule === 'All'
+              ? 'Dismiss all alerts'
+              : `Dismiss all ${filterModule} alerts`}
+            className="text-[9px] font-bold px-2 py-1 rounded tracking-wide text-[#9a9eab] dark:text-slate-400 border border-[#e2e8f0] dark:border-slate-700 hover:bg-[#ff4757] hover:text-white hover:border-[#ff4757] transition-all"
+          >
+            CLEAR ALL
+          </button>
+        )}
+      </div>
     </div>
 
     <div className="p-2 bg-[#f8fafc] dark:bg-slate-900/50 flex gap-1 border-b border-[#e2e8f0] dark:border-slate-700 shrink-0 flex-wrap transition-colors duration-300">
