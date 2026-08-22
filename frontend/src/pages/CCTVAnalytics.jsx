@@ -9,6 +9,7 @@ import ToastNotification from '../components/cctv/ToastNotification';
 import DebugPanel from '../components/cctv/DebugPanel';
 import { resolveAlertMeta } from '../components/cctv/alertMeta';
 import { dismissIncident, resolveIncident } from '../services/cctvService';
+import dashboardService from '../services/dashboardService';
 import { camerasForCurrentUser, withLiveStatus, activeCameraCount, totalCameraCount } from '../constants/cameras';
 import { useCameraHealth } from '../hooks/useCameraHealth';
 import { useAlertSound } from '../hooks/useAlertSound';
@@ -71,9 +72,27 @@ const CCTVAnalytics = () => {
   const { playAlertSound }                        = useAlertSound();
 const { alerts: contextAlerts,
         dismissAlert:  ctxDismiss,
-        resolveAlert:  ctxResolve }              = useAlerts();
+        resolveAlert:  ctxResolve,
+        seedAlerts:    ctxSeed }                 = useAlerts();
 
   const alerts = useMemo(() => contextAlerts.map(hydrateIncident), [contextAlerts]);
+
+  // Load the existing alerts on mount.
+  //
+  // This page previously read contextAlerts and never fetched anything, so it
+  // relied entirely on the socket. Only AdminDashboard fetched — which is why
+  // the log stayed empty until you visited the Admin Hub and came back: that
+  // page's fetch populated the shared context on your behalf.
+  //
+  // seedAlerts already filters out anything dismissed locally, so this cannot
+  // resurrect cleared alerts.
+  useEffect(() => {
+    let cancelled = false;
+    dashboardService.getRecentIncidents()
+      .then(items => { if (!cancelled) ctxSeed(items); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [ctxSeed]);
 
   const prevLengthRef = useRef(null);
   useEffect(() => {
