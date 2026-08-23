@@ -85,6 +85,15 @@ RESEND_API_KEY=<resend key>
 ## Key Conventions
 - Backend uses CommonJS (require/module.exports); frontend uses ES modules
 - No test suite is configured — npm test in backend exits with error
-- The frontend dev proxy is not configured in vite.config.js; API calls hardcode localhost:5000
-- backend/node_modules is tracked in git (intentional for this project)
+- The frontend dev proxy is not configured in vite.config.js; API calls read import.meta.env.VITE_API_URL (only src/context/AlertContext.jsx keeps a localhost:5000 fallback)
+- backend/node_modules is NOT tracked in git (root .gitignore covers it); hosts reinstall from package-lock.json
 - AI core camera configuration is env-var driven; CAMERAS is the single source of truth (defined at top of cctv_core.py)
+
+## Deployment
+
+- **Backend** — Heroku (Common Runtime), Basic dyno, deployed by GitHub integration from the `Deployment` branch. The repo root carries a `Procfile` and a launcher `package.json` because Heroku's GitHub integration always builds from the repo root; `.slugignore` keeps `frontend/` and `ai_core/` out of the slug.
+- **Frontend** — Vercel. `VITE_*` vars are inlined at build time, so changing them requires a redeploy, not just an env update.
+- **AI core** — runs on-prem beside the cameras; connects out to the backend over Socket.IO using `AI_SERVICE_TOKEN`.
+- **Module system** — `backend/` is CommonJS ONLY. Do not add `import`/`export` to files under `backend/`: `backend/package.json` has no `"type": "module"`, and such files load only on Node >= 22.12 (they hard-crash on 18/20).
+- **Ephemeral filesystem** — Heroku wipes the dyno disk on every restart (at least daily). Nothing that must outlive a single request may be written to disk. Audit archives and uploads go to S3 via `backend/config/s3.js`. The only permitted local writes are spreadsheet imports, which are parsed and unlinked inside one request.
+- **PORT** — injected by Heroku. Never set it as a config var; doing so causes an R10 boot timeout.

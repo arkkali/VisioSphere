@@ -1,11 +1,11 @@
-import cron from 'node-cron';
-import { runAuditArchive } from '../services/auditArchiveService.js';
-import { FACILITY_KEYS } from './facilities.js';
-import facilityScope from '../models/plugins/facilityScope.js';
+const cron = require('node-cron');
+const { runAuditArchive } = require('../services/auditArchiveService');
+const { FACILITY_KEYS } = require('./facilities');
+const facilityScope = require('../models/plugins/facilityScope');
 
 const { runWithFacility } = facilityScope;
 
-export const scheduleAuditArchive = () => {
+const scheduleAuditArchive = () => {
   cron.schedule('0 2 * * *', async () => {
     // Archived per facility rather than unscoped, so each tenant gets its own
     // workbook. Previously one .xlsx mixed both facilities' audit logs.
@@ -13,11 +13,13 @@ export const scheduleAuditArchive = () => {
       try {
         const result = await runWithFacility(facility, () => runAuditArchive());
         if (!result.skipped) {
-          console.log(`[CRON] Audit archive complete (${facility}) — ${result.archived} logs archived to ${result.filename}`);
+          console.log(`[CRON] Audit archive complete (${facility}) — ${result.archived} logs archived to ${result.key}`);
         }
       } catch (err) {
         console.error(`[CRON] Audit archive failed for ${facility}:`, err.message);
       }
     }
-  });
+  }, { scheduled: true, timezone: 'Asia/Manila' });
 };
+
+module.exports = { scheduleAuditArchive };

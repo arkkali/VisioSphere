@@ -54,3 +54,7 @@ pnpm-debug.log*
 
 # Saved analytics PDFs / generated artifacts.
 *.pdf
+
+# Generated Heroku config script — contains secrets.
+heroku-setup.ps1
+heroku-config-backup.txt

@@ -1,13 +1,35 @@
+/**
+ * auditArchiveService.js
+ *
+ * Archives audit logs older than 30 days into a formatted .xlsx, then deletes
+ * them from MongoDB.
+ *
+ * PERSISTENCE: archives go to S3, never to local disk. Heroku (and Render's
+ * free tier) give the dyno an EPHEMERAL filesystem that is wiped on every
+ * restart — at least once every 24 hours. Writing the workbook locally and
+ * then deleting the source rows from Mongo destroyed the audit trail: the
+ * .xlsx vanished with the next restart and the database rows were already
+ * gone. The Mongo delete now happens ONLY after S3 acknowledges the upload.
+ *
+ * TENANCY: each facility gets its own workbook. The S3 key carries the
+ * facility key, so two facilities archiving on the same day no longer collide
+ * on an identical filename.
+ */
 const ExcelJS = require('exceljs');
-const path = require('path');
-const fs = require('fs');
+const { PutObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const AuditLog = require('../models/AuditLog');
+const facilityScope = require('../models/plugins/facilityScope');
+const { s3, BUCKET } = require('../config/s3');
 
-const ARCHIVE_DIR = path.resolve('uploads/audit-archives');
+const ARCHIVE_PREFIX = 'audit-archives/';
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-const ensureArchiveDir = () => {
-  if (!fs.existsSync(ARCHIVE_DIR)) {
-    fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+/** Facility currently in scope, or UNSCOPED when called outside runWithFacility. */
+const currentFacilityKey = () => {
+  try {
+    return facilityScope.currentFacility?.() || 'UNSCOPED';
+  } catch {
+    return 'UNSCOPED';
   }
 };
 
@@ -24,13 +46,17 @@ const formatDate = (date) => {
   });
 };
 
-const buildFilename = (cutoff) => {
+const buildFilename = (cutoff, facility) => {
   const tag = cutoff.toISOString().slice(0, 10);
-  return `audit_archive_${tag}.xlsx`;
+  return `audit_archive_${facility}_${tag}.xlsx`;
 };
 
 const runAuditArchive = async () => {
-  ensureArchiveDir();
+  if (!BUCKET) {
+    throw new Error('AWS_BUCKET_NAME is not set — refusing to archive without a destination.');
+  }
+
+  const facility = currentFacilityKey();
 
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 30);
@@ -38,11 +64,11 @@ const runAuditArchive = async () => {
   const logs = await AuditLog.find({ createdAt: { $lt: cutoff } }).sort({ createdAt: 1 }).lean();
 
   if (logs.length === 0) {
-    return { archived: 0, filename: null, skipped: true };
+    return { archived: 0, filename: null, key: null, facility, skipped: true };
   }
 
-  const filename = buildFilename(cutoff);
-  const filepath = path.join(ARCHIVE_DIR, filename);
+  const filename = buildFilename(cutoff, facility);
+  const key = `${ARCHIVE_PREFIX}${filename}`;
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'VisioSphere System';
@@ -123,57 +149,83 @@ const runAuditArchive = async () => {
 
   sheet.autoFilter = { from: 'A1', to: 'K1' };
 
-  await workbook.xlsx.writeFile(filepath);
+  // Build in memory — no disk involved.
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
-  const written = fs.existsSync(filepath);
-  if (!written) {
-    throw new Error('Archive file was not written successfully — aborting delete.');
+  if (!buffer || buffer.length < 1024) {
+    throw new Error('Archive workbook appears corrupt (< 1KB) — aborting delete.');
   }
 
-  const stats = fs.statSync(filepath);
-  if (stats.size < 1024) {
-    fs.unlinkSync(filepath);
-    throw new Error('Archive file appears corrupt (< 1KB) — aborting delete.');
-  }
+  // Durable BEFORE destructive. If this throws, the audit logs survive.
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    Body: buffer,
+    ContentType: XLSX_MIME,
+    Metadata: {
+      facility,
+      cutoff: cutoff.toISOString(),
+      records: String(logs.length),
+    },
+  }));
 
   const ids = logs.map((l) => l._id);
   const deleteResult = await AuditLog.deleteMany({ _id: { $in: ids } });
 
   if (deleteResult.deletedCount !== logs.length) {
     throw new Error(
-      `Delete count mismatch: expected ${logs.length}, deleted ${deleteResult.deletedCount}.`
+      `Delete count mismatch: expected ${logs.length}, deleted ${deleteResult.deletedCount}. ` +
+      `Archive is safe at s3://${BUCKET}/${key}.`
     );
   }
 
   return {
     archived: logs.length,
     filename,
-    filepath,
+    key,
+    bucket: BUCKET,
+    facility,
+    bytes: buffer.length,
     cutoff: cutoff.toISOString(),
     skipped: false,
   };
 };
 
-const getArchiveStatus = () => {
-  ensureArchiveDir();
-  const files = fs.readdirSync(ARCHIVE_DIR).filter((f) => f.endsWith('.xlsx'));
+const getArchiveStatus = async () => {
+  if (!BUCKET) {
+    return { lastArchive: null, archiveCount: 0, files: [] };
+  }
+
+  const facility = currentFacilityKey();
+
+  const out = await s3.send(new ListObjectsV2Command({
+    Bucket: BUCKET,
+    Prefix: ARCHIVE_PREFIX,
+  }));
+
+  const files = (out.Contents || [])
+    .filter((o) => o.Key.endsWith('.xlsx'))
+    // Only this facility's archives. Legacy keys written before the facility
+    // segment existed have no facility in the name; they are shown to everyone
+    // rather than hidden, so old archives stay discoverable.
+    .filter((o) => o.Key.includes(`_${facility}_`) || /audit_archive_\d{4}-\d{2}-\d{2}\.xlsx$/.test(o.Key))
+    .sort((a, b) => b.Key.localeCompare(a.Key));
 
   if (files.length === 0) {
     return { lastArchive: null, archiveCount: 0, files: [] };
   }
 
-  files.sort().reverse();
-  const latest = files[0];
-  const match = latest.match(/audit_archive_(\d{4}-\d{2}-\d{2})\.xlsx/);
-  const lastArchive = match ? match[1] : null;
+  const match = files[0].Key.match(/(\d{4}-\d{2}-\d{2})\.xlsx$/);
 
   return {
-    lastArchive,
+    lastArchive: match ? match[1] : null,
     archiveCount: files.length,
-    files: files.map((f) => {
-      const stats = fs.statSync(path.join(ARCHIVE_DIR, f));
-      return { name: f, size: stats.size, createdAt: stats.birthtime };
-    }),
+    files: files.map((o) => ({
+      name: o.Key.replace(ARCHIVE_PREFIX, ''),
+      key: o.Key,
+      size: o.Size,
+      createdAt: o.LastModified,
+    })),
   };
 };
 

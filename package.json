@@ -1,14 +1,11 @@
 {
+  "name": "visiosphere",
+  "private": true,
   "scripts": {
-    "start": "cd backend && node server.js",
-    "heroku-postbuild": "cd backend && npm install --production"
+    "start": "node backend/server.js",
+    "heroku-postbuild": "cd backend && npm ci --omit=dev"
   },
   "engines": {
-    "node": ">=18"
-  },
-  "dependencies": {
-    "framer-motion": "^12.35.1",
-    "uvicorn": "^0.0.1-security",
-    "xlsx": "^0.18.5"
+    "node": "22.x"
   }
 }

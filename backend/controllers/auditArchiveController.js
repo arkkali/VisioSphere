@@ -1,19 +1,19 @@
-import { runAuditArchive, getArchiveStatus } from '../services/auditArchiveService.js';
+const { runAuditArchive, getArchiveStatus } = require('../services/auditArchiveService');
 
-export const triggerArchive = async (req, res, next) => {
+const triggerArchive = async (req, res, next) => {
   try {
-    const result = await runAuditArchive();
-    res.json(result);
+    res.json(await runAuditArchive());
   } catch (err) {
     next(err);
   }
 };
 
-export const archiveStatus = async (req, res, next) => {
+const archiveStatus = async (req, res, next) => {
   try {
-    const status = getArchiveStatus();
-    res.json(status);
+    res.json(await getArchiveStatus());
   } catch (err) {
     next(err);
   }
 };
+
+module.exports = { triggerArchive, archiveStatus };
