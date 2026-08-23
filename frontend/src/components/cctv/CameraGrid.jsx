@@ -1,17 +1,11 @@
 import CameraFeed from './CameraFeed';
-import { resolveAlertMeta } from './alertMeta';
 
-const StatusBadge = ({ status }) => {
-  const meta = resolveAlertMeta(status);
-  const isNormal = !status || status === 'NORMAL' || status === 'NO PERSON';
-  return (
-    <div className={`px-3 py-1 rounded-full text-[9px] font-black tracking-widest uppercase shadow-lg backdrop-blur-sm border ${isNormal ? 'bg-[#2ed573]/90 text-white border-[#2ed573]' : `${meta.bg}/90 text-white ${meta.border} animate-pulse`}`}>
-      {isNormal ? 'NORMAL' : status}
-    </div>
-  );
-};
-
-const CameraGrid = ({ cameras, getCameraStatus }) => (
+// The status pill that used to sit here was removed: the AI core already
+// burns "[<camera>] N person(s) | WORST: <status>" into the top band of the
+// stream itself, so the pill repeated it a few pixels away — and the two
+// could disagree for a frame or two, since the pill re-renders on socket
+// events while the band is part of the image.
+const CameraGrid = ({ cameras }) => (
   <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4 w-full h-max">
     {cameras.map(c => (
       <div key={c.cameraId} className="bg-black rounded-xl border border-[#e2e8f0] dark:border-slate-700 shadow-md overflow-hidden relative flex flex-col w-full aspect-video">
@@ -20,7 +14,6 @@ const CameraGrid = ({ cameras, getCameraStatus }) => (
             <h2 className="text-white drop-shadow-md font-black text-sm m-0">{c.name}</h2>
             <p className="text-white/70 text-[10px] font-medium m-0 mt-0.5">{c.location}</p>
           </div>
-          {c.status === 'Active' && <StatusBadge status={getCameraStatus(c.cameraId)} />}
         </div>
         <div className="flex-1 w-full h-full relative">
           <CameraFeed camera={c} isWebcam={false} isLoading={false} />

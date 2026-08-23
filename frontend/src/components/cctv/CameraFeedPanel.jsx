@@ -1,17 +1,8 @@
 import CameraFeed from './CameraFeed';
-import { resolveAlertMeta } from './alertMeta';
 
-const StatusBadge = ({ status }) => {
-  const meta = resolveAlertMeta(status);
-  const isNormal = !status || status === 'NORMAL' || status === 'NO PERSON';
-  return (
-    <div className={`px-3 py-1 rounded-full text-[9px] font-black tracking-widest uppercase shadow-lg backdrop-blur-sm border ${isNormal ? 'bg-[#2ed573]/90 text-white border-[#2ed573]' : `${meta.bg}/90 text-white ${meta.border} animate-pulse`}`}>
-      {isNormal ? 'NORMAL' : status}
-    </div>
-  );
-};
-
-const CameraFeedPanel = ({ camera, getCameraStatus }) => {
+// Status pill removed — see the note in CameraGrid.jsx. The stream's own top
+// band already reports the worst status for the camera.
+const CameraFeedPanel = ({ camera }) => {
   if (!camera) return null;
   return (
     <div className="bg-black rounded-xl border border-[#e2e8f0] dark:border-slate-700 shadow-md overflow-hidden relative flex flex-col w-full aspect-video max-w-5xl mx-auto">
@@ -23,7 +14,6 @@ const CameraFeedPanel = ({ camera, getCameraStatus }) => {
             {camera.location}
           </p>
         </div>
-        {camera.status === 'Active' && <StatusBadge status={getCameraStatus(camera.cameraId)} />}
       </div>
       <div className="flex-1 w-full h-full relative">
         <CameraFeed camera={camera} isWebcam={false} isLoading={false} />
