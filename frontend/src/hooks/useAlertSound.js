@@ -16,7 +16,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
  * Routing:
  *   • Emergency (Fall, Inactivity, Inactivity (Posture), Prolonged Fall)
  *       → /sounds/emergency.mp3
- *   • Warning (Agitation, Pacing, Lying Down, others)
+ *   • Warning (Agitation, Lying Down, others)
  *       → /sounds/warning.mp3
  *
  * Both sounds are capped at PLAY_DURATION_MS (5 seconds).

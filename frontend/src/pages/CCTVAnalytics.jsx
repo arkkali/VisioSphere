@@ -254,7 +254,6 @@ const { alerts: contextAlerts,
                 {[
                   { label: 'Fall',       color: 'bg-[#ef4444]' },
                   { label: 'Agitation',  color: 'bg-[#a855f7]' },
-                  { label: 'Pacing',     color: 'bg-[#f97316]' },
                   { label: 'Inactivity', color: 'bg-[#eab308]' },
                   { label: 'Lying Down', color: 'bg-[#64748b]' },
                 ].map(m => (

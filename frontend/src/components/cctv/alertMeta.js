@@ -29,16 +29,6 @@ export const ALERT_META = {
     icon: "😤",
     severity: "Medium",
   },
-  PACING: {
-    module: "Pacing",
-    label: "Pacing Detected",
-    bg: "bg-[#f97316]",
-    border: "border-l-[#f97316]",
-    text: "text-[#f97316]",
-    badge: "bg-[#f97316]",
-    icon: "🔄",
-    severity: "Medium",
-  },
   INACTIVE: {
     module: "Inactivity",
     label: "Inactivity",
@@ -74,7 +64,6 @@ export const ALERT_META = {
 export const MODULE_LABELS = {
   Fall: "Fall",
   Agitation: "Agitation",
-  Pacing: "Pacing",
   Inactivity: "Inactivity",
   "Lying Down": "Lying Down",
 };

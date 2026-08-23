@@ -21,7 +21,6 @@ const incidentTypeToCategory = (incidentType) => {
     case 'Fall':
     case 'Prolonged Fall':       return 'Fall';
     case 'Agitation':            return 'Agitation';
-    case 'Pacing':               return 'Pacing';
     case 'Inactivity':
     case 'Inactivity (Posture)': return 'Inactivity';
     case 'Lying Down':           return 'Lying Down';
@@ -31,7 +30,7 @@ const incidentTypeToCategory = (incidentType) => {
 
 const emptyDayRow = (name, dateISO) => ({
   name, date: dateISO, alerts: 0,
-  Fall: 0, Agitation: 0, Pacing: 0, Inactivity: 0, 'Lying Down': 0,
+  Fall: 0, Agitation: 0, Inactivity: 0, 'Lying Down': 0,
 });
 
 const localDateStr = (d) => {
@@ -285,7 +284,6 @@ const AdminDashboard = () => {
             date:         row.date,
             Fall:         row.Fall       || 0,
             Agitation:    row.Agitation  || 0,
-            Pacing:       row.Pacing     || 0,
             Inactivity:   row.Inactivity || 0,
             'Lying Down': row['Lying Down'] || 0,
           };
@@ -394,7 +392,6 @@ const AdminDashboard = () => {
             date:         r.date,
             Fall:         r.Fall       || 0,
             Agitation:    r.Agitation  || 0,
-            Pacing:       r.Pacing     || 0,
             Inactivity:   r.Inactivity || 0,
             'Lying Down': r['Lying Down'] || 0,
           })),
@@ -428,7 +425,6 @@ const AdminDashboard = () => {
           date:         r.date,
           Fall:         r.Fall       || 0,
           Agitation:    r.Agitation  || 0,
-          Pacing:       r.Pacing     || 0,
           Inactivity:   r.Inactivity || 0,
           'Lying Down': r['Lying Down'] || 0,
         })),

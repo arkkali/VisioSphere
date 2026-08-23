@@ -1,6 +1,6 @@
 import AlertItem from './AlertItem';
 
-const FILTERS = ['All', 'Unresolved', 'Fall', 'Agitation', 'Pacing', 'Inactivity', 'Lying Down'];
+const FILTERS = ['All', 'Unresolved', 'Fall', 'Agitation', 'Inactivity', 'Lying Down'];
 
 const AlertSidebar = ({ filteredAlerts, filterModule, onFilterChange, unresolvedCount, onResolveIntent, onDismiss, onClearAll }) => (
   <div className="w-[340px] shrink-0 bg-white dark:bg-slate-800 border border-[#e2e8f0] dark:border-slate-700 rounded-xl shadow-sm flex flex-col h-full overflow-hidden transition-colors duration-300">

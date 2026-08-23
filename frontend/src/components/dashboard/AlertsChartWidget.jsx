@@ -1,12 +1,11 @@
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const CATEGORY_ORDER = ["Fall", "Agitation", "Pacing", "Inactivity", "Lying Down"];
+const CATEGORY_ORDER = ["Fall", "Agitation", "Inactivity", "Lying Down"];
 
 const CATEGORY_COLORS = {
   Fall: "#ef4444",
   Agitation: "#a855f7",
-  Pacing: "#f97316",
   Inactivity: "#eab308",
   "Lying Down": "#64748b",
 };
