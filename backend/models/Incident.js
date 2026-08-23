@@ -16,7 +16,6 @@ const incidentSchema = new mongoose.Schema(
         'Prolonged Fall',
         'Lying Down',
         'Agitation',
-        'Pacing',
         'Inactivity',
         'Inactivity (Posture)',
         'Unusual Movement',

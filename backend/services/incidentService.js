@@ -110,7 +110,6 @@ async function getWeeklyStats(query) {
             branches: [
               { case: { $in: ['$incidentType', ['Fall', 'Prolonged Fall']] }, then: 'Fall' },
               { case: { $eq: ['$incidentType', 'Agitation'] }, then: 'Agitation' },
-              { case: { $eq: ['$incidentType', 'Pacing'] }, then: 'Pacing' },
               { case: { $in: ['$incidentType', ['Inactivity', 'Inactivity (Posture)']] }, then: 'Inactivity' },
               { case: { $eq: ['$incidentType', 'Lying Down'] }, then: 'Lying Down' }
             ],
@@ -134,7 +133,7 @@ async function getWeeklyStats(query) {
   const emptyDay = (d) => ({
     date: d,
     Emergency: 0, Warning: 0, Info: 0,
-    Fall: 0, Agitation: 0, Pacing: 0, Inactivity: 0, 'Lying Down': 0, Other: 0,
+    Fall: 0, Agitation: 0, Inactivity: 0, 'Lying Down': 0, Other: 0,
     total: 0
   });
 

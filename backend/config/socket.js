@@ -22,7 +22,6 @@ const parseAlert = (payload = {}) => {
   else if (/^PROLONGED FALL/i.test(cleanMessage))                   incidentType = 'Prolonged Fall';
   else if (/^LYING DOWN/i.test(cleanMessage))                       incidentType = 'Lying Down';
   else if (/AGITATION_RISK/i.test(cleanMessage))                    incidentType = 'Agitation';
-  else if (/^PACING/i.test(cleanMessage))                           incidentType = 'Pacing';
   else if (/^INACTIVE\s*[—\-]\s*POSTURE/i.test(cleanMessage))       incidentType = 'Inactivity (Posture)';
   else if (/^INACTIVE/i.test(cleanMessage))                         incidentType = 'Inactivity';
 
