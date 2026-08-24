@@ -47,6 +47,10 @@ function categoryFor(incidentType) {
   return EVENT_TYPE_CATEGORY[incidentType] || incidentType;
 }
 
+/** Exported so a reclassified clip can be re-bucketed in place, without
+ *  reloading the whole grid just to recompute one card's category. */
+export const categoryForType = categoryFor;
+
 /** Pills shown in EventFilterPills. 'All Events' plus the categories above. */
 export const eventTypes = [
   { id: 'all', label: 'All Events' },
@@ -103,6 +107,7 @@ function mapIncidentToClip(incident) {
     rawIncidentType: incident.incidentType,
     cameraName: incident.location,
     cameraId: incident.cameraId,
+    note: incident.note || '',
     thumbnail: null,
     duration: null,
     dateLabel: formatDateLabel(createdAt),
@@ -166,6 +171,93 @@ export async function getClipVideoUrl(incidentId) {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Thumbnails
+// ---------------------------------------------------------------------------
+/**
+ * Signed poster URLs for many clips at once: { [incidentId]: url }.
+ *
+ * Batched deliberately. One request per card would be a dozen round trips
+ * through the Cloudflare tunnel on every page load, and folding poster URLs
+ * into the clip list would mint a signed token for every incident the
+ * dashboard polls, most of which nobody ever looks at.
+ *
+ * Ids missing from the response have no poster available -- the card keeps its
+ * gradient placeholder. That is a normal state, not an error: clips recorded
+ * before ai_core started writing posters simply do not have one.
+ */
+export async function fetchThumbnailUrls(ids = []) {
+  if (!ids.length) return {};
+  const { data } = await axiosInstance.get(`${API_PREFIX}/incidents/thumbnail-urls`, {
+    params: { ids: ids.join(',') },
+  });
+  return data || {};
+}
+
+// ---------------------------------------------------------------------------
+// Edit / delete
+// ---------------------------------------------------------------------------
+/**
+ * Event types the backend will accept for a reclassification. Mirrors the
+ * enum on backend/models/Incident.js -- the server validates against its own
+ * schema regardless, so this list only shapes the dropdown.
+ */
+export const INCIDENT_TYPES = [
+  'Fall',
+  'Prolonged Fall',
+  'Lying Down',
+  'Agitation',
+  'Inactivity',
+  'Inactivity (Posture)',
+  'Unusual Movement',
+  'False Alarm',
+];
+
+/**
+ * Correct the record attached to a recording.
+ *
+ * The video itself is immutable -- "editing a clip" means fixing what it was
+ * labelled as, which is the part that is ever actually wrong (the detector
+ * calls a resident sitting down heavily a fall; the nurse who watched it knows
+ * better). Reclassifying also moves severity server-side, so the dashboard
+ * totals follow the correction.
+ *
+ * @param {string} incidentId
+ * @param {{ incidentType?: string, note?: string }} changes
+ */
+export async function updateClip(incidentId, changes) {
+  const { data } = await axiosInstance.patch(
+    `${API_PREFIX}/incidents/${incidentId}/clip`,
+    changes
+  );
+  return data;
+}
+
+/**
+ * Delete the recording from the mini PC.
+ *
+ * The INCIDENT is kept -- only the video goes. Removing the incident too would
+ * let anyone quietly lower the facility's fall count by deleting the evidence.
+ * Backend restricts this to a Facility Admin and writes an audit entry.
+ */
+export async function deleteClip(incidentId) {
+  const { data } = await axiosInstance.delete(
+    `${API_PREFIX}/incidents/${incidentId}/clip`
+  );
+  return data;
+}
+
+/** True if the signed-in user may delete recordings. The backend enforces this
+ *  independently; this only decides whether to render the control. */
+export function canDeleteClips() {
+  try {
+    return localStorage.getItem('userRole') === 'Facility Admin';
+  } catch (_) {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Camera groups
 // ---------------------------------------------------------------------------
@@ -197,5 +289,11 @@ export default {
   eventTypes,
   fetchVideoClips,
   getClipVideoUrl,
+  fetchThumbnailUrls,
+  updateClip,
+  deleteClip,
+  canDeleteClips,
   getCameraGroups,
+  categoryForType,
+  INCIDENT_TYPES,
 };

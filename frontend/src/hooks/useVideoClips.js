@@ -7,7 +7,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   eventTypes,
   fetchVideoClips,
+  fetchThumbnailUrls,
+  categoryForType,
   getCameraGroups,
+  updateClip as updateClipRequest,
+  deleteClip as deleteClipRequest,
 } from '../services/videoClipsService';
 
 const DEFAULT_VISIBLE_COUNT = 6;
@@ -58,6 +62,24 @@ export function useVideoClips() {
     try {
       const items = await fetchVideoClips();
       setClips(items);
+
+      // Thumbnails are fetched SEPARATELY and after the fact, on purpose. They
+      // are decoration: the grid is fully usable with gradient placeholders, so
+      // nothing here should delay showing it. A failure is swallowed for the
+      // same reason -- a missing thumbnail must never surface as "unable to
+      // load video clips" when the clips loaded perfectly well.
+      if (items.length) {
+        fetchThumbnailUrls(items.map((c) => c.id))
+          .then((urls) => {
+            if (!urls || !Object.keys(urls).length) return;
+            setClips((prev) =>
+              prev.map((c) => (urls[c.id] ? { ...c, thumbnail: urls[c.id] } : c))
+            );
+          })
+          .catch((err) =>
+            console.warn('[useVideoClips] thumbnails unavailable:', err?.message)
+          );
+      }
     } catch (err) {
       console.error('[useVideoClips] failed to load clips:', err);
       setError('Unable to load video clips. Please try again.');
@@ -136,6 +158,43 @@ export function useVideoClips() {
     return groups;
   }, [clips, activeEventType, search, selectedHouseId, cameraGroups]);
 
+  /**
+   * Apply a correction and patch the one clip in place.
+   *
+   * Not a full reload: re-fetching would rebuild every group, collapse any
+   * "show more" the user had expanded, and re-request all the thumbnails --
+   * a lot of visible churn for a one-field change. The server's response is
+   * the source of truth for the new values, including the severity it derived.
+   */
+  const editClip = useCallback(async (clipId, changes) => {
+    const updated = await updateClipRequest(clipId, changes);
+    setClips((prev) =>
+      prev.map((c) =>
+        c.id === clipId
+          ? {
+              ...c,
+              rawIncidentType: updated.incidentType,
+              eventType: categoryForType(updated.incidentType),
+              note: updated.note || '',
+            }
+          : c
+      )
+    );
+    return updated;
+  }, []);
+
+  /**
+   * Delete a recording and drop its card.
+   *
+   * Only the CLIP is deleted; the incident record survives on the backend, so
+   * the fall still counts in reports. It leaves this list because this list is
+   * defined as "incidents that have a clip".
+   */
+  const removeClip = useCallback(async (clipId) => {
+    await deleteClipRequest(clipId);
+    setClips((prev) => prev.filter((c) => c.id !== clipId));
+  }, []);
+
   const showMoreForHouse = useCallback((houseId) => {
     setVisibleCounts((prev) => ({
       ...prev,
@@ -158,6 +217,8 @@ export function useVideoClips() {
     groupedClips,
     visibleCounts,
     showMoreForHouse,
+    editClip,
+    removeClip,
     reload: loadClips,
   };
 }

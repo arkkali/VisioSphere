@@ -5,7 +5,16 @@ import VideoClipCard from './VideoClipCard';
 // Renders one house's section: a heading + a grid of clip cards, with a
 // "show more" arrow if there are more clips than currently visible.
 // Matches the Figma's 3-column grid with a right-side chevron per row.
-const VideoClipsGrid = ({ houseName, clips, visibleCount, onShowMore, onSelectClip }) => {
+const VideoClipsGrid = ({
+  houseName,
+  clips,
+  visibleCount,
+  onShowMore,
+  onSelectClip,
+  onEditClip,
+  onDeleteClip,
+  canDelete,
+}) => {
   const visibleClips = clips.slice(0, visibleCount);
   const hasMore = clips.length > visibleCount;
 
@@ -21,7 +30,14 @@ const VideoClipsGrid = ({ houseName, clips, visibleCount, onShowMore, onSelectCl
       <div className="flex items-start gap-3">
         <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {visibleClips.map((clip) => (
-            <VideoClipCard key={clip.id} clip={clip} onSelect={onSelectClip} />
+            <VideoClipCard
+              key={clip.id}
+              clip={clip}
+              onSelect={onSelectClip}
+              onEdit={onEditClip}
+              onDelete={onDeleteClip}
+              canDelete={canDelete}
+            />
           ))}
         </div>
 

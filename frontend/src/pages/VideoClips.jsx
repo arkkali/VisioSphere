@@ -1,5 +1,5 @@
 // frontend/src/pages/VideoClips.jsx
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import Sidebar from '../components/Sidebar';
@@ -9,8 +9,11 @@ import VideoClipsToolbar from '../components/videoClips/VideoClipsToolbar';
 import HouseSelector from '../components/videoClips/HouseSelector';
 import VideoClipsGrid from '../components/videoClips/VideoClipsGrid';
 import VideoPlayerModal from '../components/videoClips/VideoPlayerModal';
+import EditClipModal from '../components/videoClips/EditClipModal';
+import DeleteClipDialog from '../components/videoClips/DeleteClipDialog';
 
 import { useVideoClips } from '../hooks/useVideoClips';
+import { canDeleteClips } from '../services/videoClipsService';
 
 const VideoClips = () => {
   const location = useLocation();
@@ -18,6 +21,13 @@ const VideoClips = () => {
 
   // Currently-open clip in the playback modal. null = modal closed.
   const [selectedClip, setSelectedClip] = useState(null);
+  const [editingClip, setEditingClip] = useState(null);
+  const [deletingClip, setDeletingClip] = useState(null);
+
+  // Read once per mount. The backend enforces this independently on
+  // DELETE /incidents/:id/clip; this only decides whether to offer the
+  // control, so a tampered localStorage buys nothing but a 403.
+  const canDelete = useMemo(() => canDeleteClips(), []);
 
   const {
     loading,
@@ -34,6 +44,8 @@ const VideoClips = () => {
     groupedClips,     // [{ houseId, houseName, clips: [...] }] — already filtered
     visibleCounts,    // { [houseId]: number } — cards to show before "show more"
     showMoreForHouse, // (houseId) => void
+    editClip,         // (id, { incidentType, note }) => Promise
+    removeClip,       // (id) => Promise
   } = useVideoClips();
 
   return (
@@ -110,6 +122,9 @@ const VideoClips = () => {
                     visibleCount={visibleCounts[group.houseId] || 6}
                     onShowMore={() => showMoreForHouse(group.houseId)}
                     onSelectClip={setSelectedClip}
+                    onEditClip={setEditingClip}
+                    onDeleteClip={setDeletingClip}
+                    canDelete={canDelete}
                   />
                 ))}
               </div>
@@ -119,6 +134,16 @@ const VideoClips = () => {
       </main>
 
       <VideoPlayerModal clip={selectedClip} onClose={() => setSelectedClip(null)} />
+      <EditClipModal
+        clip={editingClip}
+        onClose={() => setEditingClip(null)}
+        onSave={editClip}
+      />
+      <DeleteClipDialog
+        clip={deletingClip}
+        onClose={() => setDeletingClip(null)}
+        onConfirm={removeClip}
+      />
     </div>
   );
 };
