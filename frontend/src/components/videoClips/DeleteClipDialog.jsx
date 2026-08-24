@@ -43,6 +43,12 @@ const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
         onProgress: (current, total) =>
           setProgress(total > 1 ? { current, total } : null),
       });
+      // Reset before closing. The page now mounts this per open, so a stale
+      // flag can no longer strand the next delete — but leaving state dirty on
+      // the success path is what caused that bug, and a component should not
+      // depend on its parent unmounting it to stay correct.
+      setDeleting(false);
+      setProgress(null);
       onClose();
     } catch (err) {
       if (controller.signal.aborted) return; // user backed out; nothing to report

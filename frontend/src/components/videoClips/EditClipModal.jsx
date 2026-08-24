@@ -32,6 +32,9 @@ const EditClipModal = ({ clip, onClose, onSave }) => {
     setError(null);
     try {
       await onSave(clip.id, { incidentType, note });
+      // Same reasoning as DeleteClipDialog: never leave the busy flag set on
+      // the way out, or a reused instance opens permanently disabled.
+      setSaving(false);
       onClose();
     } catch (err) {
       console.error('[EditClipModal] save failed:', err);

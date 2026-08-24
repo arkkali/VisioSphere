@@ -200,16 +200,28 @@ const VideoClips = () => {
       </main>
 
       <VideoPlayerModal clip={selectedClip} onClose={() => setSelectedClip(null)} />
-      <EditClipModal
-        clip={editingClip}
-        onClose={() => setEditingClip(null)}
-        onSave={editClip}
-      />
-      <DeleteClipDialog
-        clips={pendingDelete}
-        onClose={() => setPendingDelete(null)}
-        onConfirm={removeClips}
-      />
+      {/* Mounted ONLY while there is something to act on.
+          These used to render unconditionally and return null internally, so
+          the component instance — and its state — survived between openings.
+          After one successful delete, `deleting` stayed true (it was only
+          reset on the error path), and every later open showed a dialog
+          already stuck on "Deleting…" with its button disabled. Conditional
+          mounting makes each open a fresh instance, which is the same reason
+          ClipPlayer is keyed by clip.id in VideoPlayerModal. */}
+      {editingClip && (
+        <EditClipModal
+          clip={editingClip}
+          onClose={() => setEditingClip(null)}
+          onSave={editClip}
+        />
+      )}
+      {pendingDelete && (
+        <DeleteClipDialog
+          clips={pendingDelete}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={removeClips}
+        />
+      )}
     </div>
   );
 };
