@@ -131,6 +131,18 @@ const Sidebar = () => {
             )}
           </NavLink>
 
+          <NavLink to={`${basePath}/video-clips`} className={({ isActive }) => `group flex items-center justify-between py-[12px] px-[16px] rounded-[12px] no-underline bg-transparent border-none cursor-pointer transition-all duration-200 w-full box-border text-left ${isActive ? 'bg-gradient-to-br from-[#38bdf8] to-[#0284c7] shadow-[0_4px_12px_rgba(2,132,199,0.3)]' : 'hover:bg-[#00a8e814] dark:hover:bg-slate-800'}`}>
+            {({ isActive }) => (
+              <>
+                <div className="flex flex-col leading-[1.3]">
+                  <span className={`font-extrabold text-[0.95rem] transition-colors duration-200 ${isActive ? 'text-white' : 'text-[#003543] dark:text-slate-200 group-hover:text-primary-blue dark:group-hover:text-[#38bdf8]'}`}>Video Clips</span>
+                  <span className={`font-normal text-[0.8rem] transition-colors duration-200 ${isActive ? 'text-white/85' : 'text-[#475569] dark:text-slate-400'}`}>Event Replays</span>
+                </div>
+                <div className={`w-[14px] h-[14px] border-[2.5px] border-white rounded-full ${isActive ? 'block' : 'hidden'}`}></div>
+              </>
+            )}
+          </NavLink>
+
           <NavLink to={`${basePath}/assessments`} className={({ isActive }) => `group flex items-center justify-between py-[12px] px-[16px] rounded-[12px] no-underline bg-transparent border-none cursor-pointer transition-all duration-200 w-full box-border text-left ${isActive ? 'bg-gradient-to-br from-[#38bdf8] to-[#0284c7] shadow-[0_4px_12px_rgba(2,132,199,0.3)]' : 'hover:bg-[#00a8e814] dark:hover:bg-slate-800'}`}>
             {({ isActive }) => (
               <>

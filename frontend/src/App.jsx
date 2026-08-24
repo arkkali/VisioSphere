@@ -10,6 +10,7 @@ import CCTVAnalytics from './pages/CCTVAnalytics';
 import AuditTrail from './pages/AuditTrail';
 import Settings from './pages/Settings';
 import DailyAssessments from './pages/DailyAssessments';
+import VideoClips from './pages/VideoClips';
 import NotFoundPage from './pages/NotFoundPage';
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
             <Route path="/admin/guardians" element={<GuardianDashboard />} />
             <Route path="/admin/monitoring" element={<CCTVAnalytics />} />
             <Route path="/admin/assessments" element={<DailyAssessments />} />
+            <Route path="/admin/video-clips" element={<VideoClips />} />
             <Route path="/admin/audit" element={<AuditTrail />} />
             <Route path="/admin/settings" element={<Settings />} />
             <Route path="/nurse" element={<AdminDashboard />} />
@@ -32,6 +34,7 @@ function App() {
             <Route path="/nurse/guardians" element={<GuardianDashboard />} />
             <Route path="/nurse/monitoring" element={<CCTVAnalytics />} />
             <Route path="/nurse/assessments" element={<DailyAssessments />} />
+            <Route path="/nurse/video-clips" element={<VideoClips />} />
             <Route path="/nurse/settings" element={<Settings />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
