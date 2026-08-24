@@ -38,7 +38,8 @@ const ClipPlayer = ({ clip, onClose }) => {
   const [resolvedUrl, setResolvedUrl] = useState(null);
   const [urlError, setUrlError] = useState(null);
   const [duration, setDuration] = useState(null);
-  const [playbackFailed, setPlaybackFailed] = useState(false);
+  // null = fine. Otherwise a reason string: 'decode' | 'network' | 'http:<status>'.
+  const [playbackFailure, setPlaybackFailure] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,11 +88,43 @@ const ClipPlayer = ({ clip, onClose }) => {
     }
   };
 
-  // A decode failure is worth calling out specifically. If ai_core fell back to
-  // the mp4v codec (no H.264 encoder in its OpenCV build) the file downloads
-  // fine and then renders as a black box, which otherwise looks like a network
-  // problem and sends people debugging the wrong layer.
-  const handleError = () => setPlaybackFailed(true);
+  // <video onError> fires for BOTH transport failures (expired token -> 403,
+  // missing file -> 404, tunnel down) and decode failures (the file arrived
+  // intact but the browser has no decoder for it). The element cannot tell
+  // them apart -- error.code is MEDIA_ERR_SRC_NOT_SUPPORTED for both -- and
+  // guessing sends people debugging the wrong layer. So re-request one byte
+  // and let the status code say which it was.
+  const handleError = () => {
+    if (!resolvedUrl) {
+      setPlaybackFailure('network');
+      return;
+    }
+    fetch(resolvedUrl, { headers: { Range: 'bytes=0-0' } })
+      .then((res) => {
+        // Server handed the bytes over, so the token, the tunnel and the file
+        // are all fine -- which leaves the codec.
+        setPlaybackFailure(res.ok ? 'decode' : `http:${res.status}`);
+      })
+      .catch(() => setPlaybackFailure('network'));
+  };
+
+  const failureMessage = (reason) => {
+    if (reason === 'decode') {
+      return 'The clip downloaded, but this browser cannot decode it. It was ' +
+        'likely recorded as mp4v — run scripts/transcode_clips.py on the mini PC.';
+    }
+    if (reason === 'http:403') {
+      return 'Access to this clip was refused. The playback link may have ' +
+        'expired — close and reopen the clip to request a fresh one.';
+    }
+    if (reason === 'http:404') {
+      return 'The recording is no longer on disk.';
+    }
+    if (reason && reason.startsWith('http:')) {
+      return `The clip could not be retrieved (error ${reason.slice(5)}).`;
+    }
+    return 'The clip could not be reached. The camera recorder may be offline.';
+  };
 
   return (
     <div
@@ -128,10 +161,9 @@ const ClipPlayer = ({ clip, onClose }) => {
           </div>
         ) : urlError ? (
           <p className="m-0 text-white text-sm font-semibold px-6 text-center">{urlError}</p>
-        ) : playbackFailed ? (
-          <p className="m-0 text-white text-sm font-semibold px-6 text-center">
-            This clip could not be played. It may be recorded in a format this
-            browser cannot decode — check the ai_core log for a codec warning.
+        ) : playbackFailure ? (
+          <p className="m-0 text-white text-sm font-semibold px-6 text-center max-w-[80%]">
+            {failureMessage(playbackFailure)}
           </p>
         ) : resolvedUrl ? (
           <video
