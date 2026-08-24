@@ -1,0 +1,54 @@
+# /etc/systemd/system/visiosphere-clips.service
+#
+# Serves the recorded clip archive, independently of detection.
+#
+# Deliberately NOT a dependency of visiosphere-ai and not depended on by it.
+# The whole point is that stopping, restarting, upgrading or crashing the
+# detection stack leaves the archive readable. Wiring the two together with
+# Requires= or After= would quietly reintroduce the coupling this exists to
+# remove.
+#
+# Install:
+#   sudo cp scripts/visiosphere-clips.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now visiosphere-clips
+#   systemctl status visiosphere-clips
+#   curl localhost:5002/health
+
+[Unit]
+Description=VisioSphere clip archive server
+Documentation=file:/opt/visiosphere/repo/ai_core/clip_server.py
+# Network only. No relationship to visiosphere-ai, on purpose.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/visiosphere/repo/ai_core
+
+# Uses the venv if one is present; falls back to system python otherwise. The
+# only requirements are flask and flask-cors, both already installed for
+# cctv_core.py.
+ExecStart=/bin/sh -c 'exec "$(test -x /opt/visiosphere/repo/venv/bin/python3 && echo /opt/visiosphere/repo/venv/bin/python3 || echo /usr/bin/python3)" /opt/visiosphere/repo/ai_core/clip_server.py'
+
+# CLIP_DIR and CLIP_SIGNING_SECRET are read from ai_core/.env by the script
+# itself, so the secret is not duplicated into this unit file where it would
+# end up world-readable under /etc.
+Environment=PYTHONUNBUFFERED=1
+
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=visiosphere-clips
+
+# This process only ever reads and deletes files inside CLIP_DIR. Nothing it
+# does needs write access anywhere else, so it does not get any.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/visiosphere/clips
+
+[Install]
+WantedBy=multi-user.target

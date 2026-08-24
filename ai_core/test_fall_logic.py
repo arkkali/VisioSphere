@@ -255,8 +255,8 @@ def run_reassoc_tests(ns):
     ns["_clip_alias"].clear()
 
     fall_machines, last_seen = {}, {}
-    agi, pacing, movement = {}, {}, {}
-    carry = (agi, pacing, movement)
+    agi, movement = {}, {}
+    carry = (agi, movement)
 
     # ID 7 walks in upright, then goes down.
     sm7 = FallStateMachine()
@@ -399,7 +399,7 @@ def run_style_tests(ns):
                "FALL DETECTED (HIGH CONFIDENCE)", "FALL DETECTED (MEDIUM CONFIDENCE)",
                "FALL DETECTED (UNWITNESSED)", "FALL? (CONFIRMING)",
                "LYING DOWN", "LYING DOWN (CONFIRMING)", "PROLONGED FALL (12s)",
-               "FALLEN (UNSEEN)", "ON SOFA", "AGITATION_RISK", "PACING DETECTED"]
+               "FALLEN (UNSEEN)", "ON SOFA", "AGITATION_RISK"]
     unstyled = [e for e in emitted if st(e) == ns["STATUS_STYLE_DEFAULT"]]
     check("every emitted label has an explicit style", not unstyled,
           f"unstyled: {unstyled}")

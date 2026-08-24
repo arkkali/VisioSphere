@@ -287,11 +287,6 @@ CORS(app)
 # camera is a single env-var change rather than three sync'd code edits.
 cam_frames = {cam_id: None for cam_id, _ in CAMERAS}
 raw_frames = {cam_id: None for cam_id, _ in CAMERAS}
-# Clean frame + what was detected in it, for the clip worker's post-roll.
-# cam_frames holds the annotated frame the browser sees; this holds the
-# unannotated twin so a clip can be repainted for one subject only.
-# See CLIP_ISOLATE_SUBJECT.
-cam_clean  = {cam_id: None for cam_id, _ in CAMERAS}
 lock     = threading.Lock()
 raw_lock = threading.Lock()
 
@@ -314,45 +309,6 @@ raw_lock = threading.Lock()
 import math
 import json
 from datetime import datetime
-
-# ── Display timezone ─────────────────────────────────────────────────────────
-# Every clock in this file used time.strftime() with no timezone, which means
-# "whatever the HOST is set to". The deployment box runs UTC while the facility
-# is in Asia/Manila, so the burnt-in HUD clock and the alert timestamp read
-# eight hours behind the wall clock in the room — 09:28 on a frame recorded at
-# 17:28. On a system whose whole purpose is telling a nurse WHEN a resident
-# fell, that is not cosmetic.
-#
-# Setting DISPLAY_TZ converts from the epoch, so it is correct whether or not
-# the host clock is fixed, and the two cannot double-correct each other.
-# Leaving it unset keeps the previous behaviour (host local time).
-#
-# The durable fix is still to set the server's own zone:
-#     sudo timedatectl set-timezone Asia/Manila
-# which also corrects journald, log files and MongoDB's createdAt.
-# Defaults to Asia/Manila rather than to the host, because requiring an extra
-# .env line to get the right time was a bad call: the clock stayed wrong after
-# a sync and looked like the fix had failed. Override DISPLAY_TZ for any other
-# site, or set it empty to go back to host local time.
-DISPLAY_TZ = os.getenv("DISPLAY_TZ", "Asia/Manila").strip()
-_display_tz = None
-if DISPLAY_TZ:
-    try:
-        from zoneinfo import ZoneInfo
-        _display_tz = ZoneInfo(DISPLAY_TZ)
-        print(f"[INIT] Clocks will render in {DISPLAY_TZ}")
-    except Exception as err:
-        print(f"[INIT] DISPLAY_TZ={DISPLAY_TZ!r} unusable ({err}); "
-              f"falling back to host local time")
-
-
-def clock_str(ts=None, fmt="%H:%M:%S"):
-    """Wall-clock string for the facility, not for the host."""
-    if _display_tz is not None:
-        return datetime.fromtimestamp(ts if ts is not None else time.time(),
-                                      _display_tz).strftime(fmt)
-    return time.strftime(fmt, time.localtime(ts) if ts is not None
-                         else time.localtime())
 
 # Inference frame size. Capture frames are downscaled to this before pose
 # inference. 640×480 is CPU-friendly; 1280×720 is the practical max with a
@@ -429,121 +385,6 @@ _clip_cooldown_until = {cam_id: 0.0 for cam_id, _ in CAMERAS}
 
 
 
-# -- Poster frames ------------------------------------------------------------
-# Each clip gets a JPEG sibling ("<clip>.jpg") so the dashboard grid can show a
-# thumbnail. The alternative -- letting the browser fetch each clip and draw a
-# frame to a canvas -- would download every clip in the list just to browse it,
-# over the tunnel, and would mint a full playback token for clips nobody opens.
-# One small JPEG written here, once, is far cheaper for everyone.
-POSTER_MAX_WIDTH = int(os.getenv("CLIP_POSTER_WIDTH", "480"))
-POSTER_QUALITY   = int(os.getenv("CLIP_POSTER_QUALITY", "70"))
-
-
-def poster_path_for(clip_path):
-    """Sibling JPEG path for a clip. Keeps the .mp4 in the stem so the two
-    names stay obviously paired and one basename maps to the other by suffix
-    swap alone -- which is what the backend relies on when signing."""
-    return clip_path.with_suffix(".jpg")
-
-
-def _write_poster(clip_path, frames, pre_roll_len):
-    """Write a downscaled JPEG of the detection moment next to the clip.
-
-    Frame choice matters: frame 0 is CLIP_PREROLL_S seconds BEFORE anything
-    happened, so a grid of posters would be a wall of empty rooms. The frame at
-    the pre-roll boundary is the moment the detector fired, which is the one
-    frame that actually shows what the card is about.
-    """
-    if not frames:
-        return False
-    idx = min(max(pre_roll_len, 0), len(frames) - 1)
-    frame = frames[idx]
-    try:
-        h, w = frame.shape[:2]
-        if w > POSTER_MAX_WIDTH:
-            scale = POSTER_MAX_WIDTH / float(w)
-            frame = cv2.resize(frame, (POSTER_MAX_WIDTH, max(1, int(h * scale))),
-                               interpolation=cv2.INTER_AREA)
-        return bool(cv2.imwrite(str(poster_path_for(clip_path)), frame,
-                                [cv2.IMWRITE_JPEG_QUALITY, POSTER_QUALITY]))
-    except Exception as err:
-        # A missing poster is cosmetic -- the card falls back to its gradient.
-        # Never let it take down the clip itself.
-        print(f"[CLIP] poster failed for {clip_path.name}: {err}")
-        return False
-
-
-# -- Browser-playable encoding ------------------------------------------------
-# The pip-installed opencv-python wheel CANNOT write H.264. Its bundled FFmpeg
-# exposes only h264_v4l2m2m (a hardware encoder that needs a V4L2 device and
-# fails without one), so cv2.VideoWriter falls back to mp4v = MPEG-4 Part 2.
-# Chromium ships no MPEG-4 Part 2 decoder, so those files download fine and
-# then render as a black box -- which is exactly what the dashboard showed.
-#
-# Standalone ffmpeg, however, does have libx264. So the clip is written with
-# whatever codec OpenCV can manage and then transcoded in place. This runs on
-# the clip worker's own daemon thread, after recording is complete, so it never
-# blocks capture or inference.
-#
-# CLIP_TRANSCODE:  "auto" (default) transcode when ffmpeg is available and the
-#                  clip is not already H.264; "1" force; "0" disable.
-# FFMPEG_BIN:      explicit path, if ffmpeg is not on PATH.
-CLIP_TRANSCODE = os.getenv("CLIP_TRANSCODE", "auto").strip().lower()
-_ffmpeg_cached = None
-
-
-def _ffmpeg_path():
-    """Resolve ffmpeg once. Returns the path, or None if unavailable."""
-    global _ffmpeg_cached
-    if _ffmpeg_cached is None:
-        import shutil
-        _ffmpeg_cached = os.getenv("FFMPEG_BIN", "").strip() or shutil.which("ffmpeg") or ""
-    return _ffmpeg_cached or None
-
-
-def _transcode_to_h264(src_path):
-    """Rewrite `src_path` as H.264/yuv420p in place. Returns True on success.
-
-    -pix_fmt yuv420p is not optional: browsers refuse 4:2:2 and 4:4:4 H.264.
-    -movflags +faststart moves the moov atom to the front so playback can begin
-    before the whole file arrives, which matters over the tunnel.
-
-    On any failure the ORIGINAL file is left untouched. A clip in a codec the
-    browser cannot read is still evidence a nurse may need; losing it to a
-    failed conversion would be worse than showing the player error.
-    """
-    import subprocess
-    ffmpeg = _ffmpeg_path()
-    if not ffmpeg:
-        return False
-
-    tmp_path = src_path.with_name(src_path.name + ".h264.tmp.mp4")
-    cmd = [
-        ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-        "-i", str(src_path),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        "-an", str(tmp_path),
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
-        if result.returncode != 0 or not tmp_path.exists() or tmp_path.stat().st_size == 0:
-            err = (result.stderr or b"").decode("utf-8", "replace").strip()[:300]
-            print(f"[CLIP] transcode failed for {src_path.name}: {err}")
-            tmp_path.unlink(missing_ok=True)
-            return False
-        os.replace(str(tmp_path), str(src_path))
-        return True
-    except subprocess.TimeoutExpired:
-        print(f"[CLIP] transcode timed out for {src_path.name}")
-        tmp_path.unlink(missing_ok=True)
-        return False
-    except Exception as err:
-        print(f"[CLIP] transcode error for {src_path.name}: {err}")
-        tmp_path.unlink(missing_ok=True)
-        return False
-
-
 # ── Incident-scoped clips ────────────────────────────────────────────────────
 # One incident, one clip, named for the WORST thing that happened during it.
 #
@@ -568,41 +409,6 @@ CLIP_MAX_TOTAL_S = float(os.getenv("CLIP_MAX_TOTAL_S", "10"))
 # Two genuine residents falling together still both get clips; it is the
 # churn-generated duplicates beyond that which get dropped.
 CLIP_MAX_CONCURRENT = int(os.getenv("CLIP_MAX_CONCURRENT", "3"))
-
-# Hard ceiling on clips written per camera per rolling hour.
-#
-# CLIP_MAX_CONCURRENT bounds how many recordings run AT ONCE; it does nothing
-# about how many are written over time. A detection bug that mints a fresh
-# incident every few seconds therefore filled the disk — 80 files from one
-# afternoon. This is the backstop that makes storage bounded no matter what
-# the detector does upstream.
-#
-# It never suppresses an ALERT. Nurses still get every notification; only the
-# video write is skipped, and loudly, so a hit here reads as "something is
-# wrong upstream" rather than failing silently.
-# 6/hour, not 20. An unattended overnight run showed 20/hour still permits ~60
-# files while nobody is watching, which is both useless as evidence and enough
-# to matter in S3. Six an hour is still far more than a real facility produces.
-CLIP_MAX_PER_HOUR = int(os.getenv("CLIP_MAX_PER_HOUR", "6"))
-# ...and a rolling-day ceiling, because an hourly cap alone still integrates to
-# 144 files over a long unattended run.
-CLIP_MAX_PER_DAY  = int(os.getenv("CLIP_MAX_PER_DAY", "40"))
-_clip_written = {}          # cam_id -> [timestamps of clips started]
-
-
-def _clip_budget_ok(cam_id, now):
-    """True if this camera may start another clip, per hour AND per day."""
-    if CLIP_MAX_PER_HOUR <= 0 and CLIP_MAX_PER_DAY <= 0:
-        return True
-    day = [t for t in _clip_written.get(cam_id, ()) if now - t < 86400]
-    _clip_written[cam_id] = day
-    hour = [t for t in day if now - t < 3600]
-    if CLIP_MAX_PER_HOUR > 0 and len(hour) >= CLIP_MAX_PER_HOUR:
-        return False
-    if CLIP_MAX_PER_DAY > 0 and len(day) >= CLIP_MAX_PER_DAY:
-        return False
-    day.append(now)
-    return True
 _CLIP_LABEL_RANK = {"prolonged_fall": 4, "fall_detected": 3,
                     "lying_down": 2, "inactivity": 1}
 
@@ -627,33 +433,13 @@ _CLIP_LABEL_RANK = {"prolonged_fall": 4, "fall_detected": 3,
 # The per-frame wall clock is preserved so the clip stays reviewable.
 # Set CLIP_STATIC_HUD=0 to keep the live band in saved clips.
 CLIP_STATIC_HUD = os.getenv("CLIP_STATIC_HUD", "1") == "1"
-
-# ── Isolate the incident subject in saved clips ──────────────────────────────
-# The live view must show everyone — an operator watching a monitor needs the
-# whole room. A saved clip is the opposite: it is evidence about ONE person,
-# and in a lounge with eight residents the subject was lost in a thicket of
-# boxes and skeletons belonging to people who had nothing to do with it.
-#
-# So the clip is repainted at write time with only the incident's own track,
-# over an otherwise clean frame. Everyone else is still VISIBLE — they are in
-# the video — they simply carry no overlay.
-#
-# This is why the pre-roll buffer holds the clean frame plus the per-track
-# records rather than the finished annotated frame: at capture time we do not
-# yet know which person the incident will turn out to be about, and the
-# pre-roll is recorded before the event is even classified.
-#
-# Track IDs are resolved through _clip_alias, so a ByteTrack ID switch part-way
-# through an incident still follows the same body instead of losing the
-# overlay halfway through the clip.
-# Set CLIP_ISOLATE_SUBJECT=0 to go back to showing every person's overlay.
-CLIP_ISOLATE_SUBJECT = os.getenv("CLIP_ISOLATE_SUBJECT", "1") == "1"
 _CLIP_LABEL_STATUS = {
     "prolonged_fall": "PROLONGED FALL",
     "fall_detected":  "FALL DETECTED",
     "lying_down":     "LYING DOWN",
     "inactivity":     "INACTIVE",
     "agitation":      "AGITATION_RISK",
+    "pacing":         "PACING DETECTED",
 }
 # Keyed by (cam_id, track_id), NOT by camera. Keying on the camera merged two
 # different people into one incident: a lying-down for ID 12 and a fall for
@@ -725,7 +511,7 @@ def _record_alert_clip(cam_id, key, inc):
     # (capture_time, jpeg) — the timestamp is carried through so the static
     # band can keep each frame's real wall clock when it repaints the bar.
     with clip_buffer_lock:
-        pre_roll = [(ts, _jpg(f), recs) for ts, f, recs in clip_buffers[cam_id]]
+        pre_roll = [(ts, _jpg(f)) for ts, f in clip_buffers[cam_id]]
 
     # 2) Sample cam_frames at fixed cadence until the incident closes. Each
     #    new alert for this camera pushes `end_at` later, up to the cap.
@@ -745,10 +531,9 @@ def _record_alert_clip(cam_id, key, inc):
         if sleep_for > 0:
             time.sleep(sleep_for)
         with lock:
-            snap = cam_clean.get(cam_id)
-            if snap is not None:
-                _cf, _recs = snap
-                post_roll.append((time.time(), _jpg(_cf), _recs))
+            curr = cam_frames.get(cam_id)
+            if curr is not None:
+                post_roll.append((time.time(), _jpg(curr)))
         next_t += sample_dt
 
     # 3) Incident is over — resolve the filename from the worst label reached.
@@ -766,109 +551,31 @@ def _record_alert_clip(cam_id, key, inc):
     status_label = _CLIP_LABEL_STATUS.get(label, label.replace("_", " ").upper())
     bar_color    = status_color(status_label)
     all_frames = []
-    painted = 0
-    for ts, b, recs in (pre_roll + post_roll):
+    for ts, b in (pre_roll + post_roll):
         if b is None:
             continue
         frm = cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_COLOR)
         if frm is None:
             continue
-        # Repaint the overlay for THIS incident's person only. Resolving each
-        # record through _canonical_clip_key means a track that was renamed
-        # mid-incident still matches, so the overlay does not vanish partway
-        # through the clip when ByteTrack re-numbers the subject.
-        for rec in (recs or ()):
-            if CLIP_ISOLATE_SUBJECT and \
-                    _canonical_clip_key(cam_id, rec["tid"]) != key:
-                continue
-            rx1, ry1, rx2, ry2 = rec["box"]
-            rcolor = status_color(rec["status"])
-            rprio  = _priority(rec["status"])
-            r_box, r_bone, r_joint, r_font = overlay_weights(
-                ry2 - ry1, frm.shape[0], rprio)
-            cv2.rectangle(frm, (rx1, ry1), (rx2, ry2), rcolor, r_box)
-            cv2.putText(frm, f"ID {rec['tid']}", (rx1, ry2 + 14),
-                        cv2.FONT_HERSHEY_SIMPLEX, r_font, rcolor, 1)
-            if rec.get("kpts") is not None:
-                draw_pose_overlay(frm, rec["kpts"], color=rcolor,
-                                  bone_t=r_bone, joint_r=r_joint)
-            painted += 1
         if CLIP_STATIC_HUD:
             draw_status_bar(frm, cam_id, f"INCIDENT: {status_label}", bar_color,
-                            clock=clock_str(ts))
+                            clock=time.strftime("%H:%M:%S", time.localtime(ts)))
         all_frames.append(frm)
     if not all_frames:
         print(f"[CLIP] {cam_id}: no frames captured, skipping save")
         return
 
-    # 3) Encode.
-    #
-    # The codec matters more than it looks. This used to be hardcoded to "mp4v"
-    # (MPEG-4 Part 2) with a comment claiming broad <video> compatibility --
-    # that is wrong. Chromium ships no MPEG-4 Part 2 decoder, so every clip
-    # played back as a black box in Chrome, Edge and VS Code's own preview.
-    # H.264 ("avc1") is what browsers actually decode.
-    #
-    # Some OpenCV builds ship without an H.264 encoder for licensing reasons,
-    # so try in order of preference and fall back rather than failing outright:
-    # a clip in a codec the browser cannot read still beats no clip at all, and
-    # the warning below says exactly what to fix. Override with CLIP_FOURCC.
+    # 3) Encode. mp4v is broadly compatible with browser <video> tags. If your
+    #    OpenCV build lacks the codec, swap to 'avc1' or use ffmpeg-python.
     h, w = all_frames[0].shape[:2]
-    preferred = os.getenv("CLIP_FOURCC", "").strip()
-    candidates = ([preferred] if preferred else []) + ["avc1", "H264", "mp4v"]
-
-    writer = None
-    used_fourcc = None
-    for code in candidates:
-        candidate = cv2.VideoWriter(
-            str(clip_path), cv2.VideoWriter_fourcc(*code),
-            float(CLIP_FPS), (w, h)
-        )
-        if candidate.isOpened():
-            writer, used_fourcc = candidate, code
-            break
-        candidate.release()
-
-    if writer is None:
-        print(f"[CLIP] {cam_id}: no usable codec (tried {candidates}) "
-              f"at {clip_path}")
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(str(clip_path), fourcc, float(CLIP_FPS), (w, h))
+    if not writer.isOpened():
+        print(f"[CLIP] {cam_id}: VideoWriter failed to open at {clip_path}")
         return
-
-    if used_fourcc == "mp4v":
-        print(f"[CLIP] {cam_id}: WARNING encoded with mp4v -- this OpenCV build "
-              f"has no H.264 encoder, so browsers will NOT play this clip. "
-              f"Install a build with avc1 support (e.g. system ffmpeg + "
-              f"opencv-python built against it) or transcode on write.")
-    else:
-        print(f"[CLIP] {cam_id}: encoding with {used_fourcc}")
     for frame in all_frames:
         writer.write(frame)
     writer.release()
-
-    # Make the file playable in a browser. See _transcode_to_h264 above: this is
-    # the step that actually fixes playback, because OpenCV almost certainly
-    # just wrote mp4v regardless of what was requested.
-    already_h264 = used_fourcc in ("avc1", "H264", "h264")
-    want_transcode = (
-        CLIP_TRANSCODE == "1"
-        or (CLIP_TRANSCODE == "auto" and not already_h264)
-    )
-    if want_transcode:
-        if _ffmpeg_path():
-            if _transcode_to_h264(clip_path):
-                print(f"[CLIP] {cam_id}: transcoded {clip_path.name} to H.264")
-            else:
-                print(f"[CLIP] {cam_id}: WARNING left as {used_fourcc}; browsers "
-                      f"will not play {clip_path.name}")
-        else:
-            print(f"[CLIP] {cam_id}: WARNING ffmpeg not found, so {clip_path.name} "
-                  f"stays {used_fourcc} and will NOT play in a browser. "
-                  f"Install ffmpeg (apt install ffmpeg) or set FFMPEG_BIN.")
-
-    # Thumbnail for the dashboard grid. Uses the pre-transcode frame list still
-    # in memory, so it costs one JPEG encode and no extra decode.
-    if _write_poster(clip_path, all_frames, len(pre_roll)):
-        print(f"[CLIP] {cam_id}: wrote poster {poster_path_for(clip_path).name}")
 
     s3_path = None
     if CLIP_S3_BUCKET:
@@ -882,14 +589,7 @@ def _record_alert_clip(cam_id, key, inc):
             print(f"[CLIP] {cam_id}: failed to upload clip to S3: {err}")
 
     # 4) Tell the backend the clip is ready so it can update the Incident.
-    # clipPath must identify the file on THIS machine, because /clips above is
-    # what actually serves it. It used to prefer the S3 URL whenever
-    # CLIP_S3_BUCKET was set, which made playback depend on the bucket being
-    # publicly readable -- i.e. resident CCTV footage reachable by anyone with
-    # the URL. The S3 upload stays available as an offsite backup, but it no
-    # longer decides what the dashboard plays.
-    _ = s3_path
-    rel_path = f"clips/{clip_path.name}"
+    rel_path = s3_path or f"clips/{clip_path.name}"
     print(f"[CLIP] {cam_id}: saved {clip_path.name} ({len(all_frames)} frames, "
           f"{len(pre_roll)} pre / {len(post_roll)} post) -> {rel_path}")
     if sio.connected:
@@ -901,21 +601,15 @@ def _record_alert_clip(cam_id, key, inc):
         })
 
 
-def _maybe_buffer_frame(cam_id, frame, records=None):
+def _maybe_buffer_frame(cam_id, frame):
     """Throttled append into the pre-roll deque. Called by the inference thread
-    once per published frame.
-
-    `frame` is the CLEAN frame (no boxes, no skeletons) and `records` is what
-    was detected in it — see CLIP_ISOLATE_SUBJECT. The live stream keeps its
-    own fully-annotated copy in cam_frames; this pair exists so the clip worker
-    can repaint each frame with only the person the incident is about.
-    """
+    after every annotated frame is published to cam_frames."""
     now = time.time()
     if now < _clip_next_append[cam_id]:
         return
     _clip_next_append[cam_id] = now + (1.0 / max(1, CLIP_FPS))
     with clip_buffer_lock:
-        clip_buffers[cam_id].append((now, frame, records or ()))
+        clip_buffers[cam_id].append((now, frame))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pose Model — yolo11m-pose
@@ -948,13 +642,6 @@ DET_CONF = float(os.getenv("DET_CONF", "0.10"))
 # an inactivity alert. Five of seventeen is lenient — a heavily occluded
 # person still clears it, a hallucinated box generally does not.
 MIN_CONFIDENT_KPTS = int(os.getenv("MIN_CONFIDENT_KPTS", "5"))
-
-# Anatomical plausibility. MIN_CONFIDENT_KPTS asks "are there enough points?";
-# this asks "do those points describe a body?". Five weak keypoints scattered
-# across an armchair clear the first test and fail this one. See
-# pose_is_plausible() for the measurements behind 0.6.
-POSE_PLAUSIBILITY_ON  = os.getenv("POSE_PLAUSIBILITY", "1") == "1"
-POSE_MIN_TORSO_RATIO  = float(os.getenv("POSE_MIN_TORSO_RATIO", "0.6"))
 
 # Tracker config. Stock bytetrack.yaml has new_track_thresh 0.25, which is
 # ABOVE the DET_CONF floor above — so a weak detection reaches the tracker but
@@ -1097,13 +784,60 @@ VERBOSE_LOGS             = False
 INACTIVITY_VEL_MAX       = 0.015  # normalized velocity below this = stationary
 MOVEMENT_COOLDOWN_S      = 60.0
 
-# Module F (Pacing) was REMOVED. It counted a direction reversal from three
-# consecutive bbox centroids, and that test is scale-blind: a stationary person
-# whose box rattled between two points produced a 180-degree turn every frame,
-# so a motionless resident alerted as pacing. Fixing it needs a real-world
-# distance measure (leg length and duration), which does not exist in this
-# uncalibrated view. Nothing else reads it; the backend's ^PACING branch and the
-# frontend's Pacing filter simply never receive anything now.
+# ── Module F — Pacing ──────────────────────────────────────────────────────
+# Pacing = repeated back-and-forth motion within a bounded spatial range.
+# Clinically associated with sundowning, dementia agitation, and anxiety in
+# elderly populations (Cohen-Mansfield et al.; Algase NDB model).
+#
+# Two spatial geometry metrics are computed per frame, both must hold:
+#   1. Sharp turn angle >= PACING_TURN_ANGLE_MIN (150°) per reversal.
+#      Clinical AI literature (2022–2026) sets this threshold to distinguish
+#      genuine U-turns from gradual curves or gait noise. Simple sign-change
+#      reversal counting (the prior approach) fired on any drift.
+#      This also makes the efficiency ratio redundant: no purposeful locomotion
+#      produces 4+ sharp 150° U-turns, so we removed efficiency as a gate.
+#   2. Per-leg sinuosity S < PACING_SINUOSITY_MAX. Each transit leg between
+#      reversals should be nearly linear (S = 1.0 is a perfectly straight
+#      leg). High S = wandering/weaving, not pacing. Computed per segment,
+#      not over the full path (full-path sinuosity is misleading for pacing).
+# Efficiency is still computed and logged but NOT used as an alert gate —
+# the window-wide net_displacement/total_distance ratio oscillates during
+# active pacing (high when at far end, low when near start), which caused
+# the alert to fire only when the person stopped rather than during pacing.
+# ── Module on/off switch ─────────────────────────────────────────────────
+# Set PACING_MODULE=0 in ai_core/.env to stop pacing being evaluated or
+# alerted at all. Nothing else in the pipeline depends on it: the backend's
+# ^PACING branch in parseAlert simply never fires, and the frontend's Pacing
+# filter/chart category just reads zero. Existing Pacing incidents already in
+# MongoDB are untouched and still display.
+#
+# This exists because the current detector counts a "sharp reversal" from
+# three consecutive centroid samples, so a stationary person whose bounding
+# box rattles between two points produces a 180-degree turn on every frame.
+# Switching the module off is the safe interim while that is redesigned —
+# prefer it to deleting the code, which is a scope change to a documented
+# module rather than a bug fix.
+PACING_ON = os.getenv("PACING_MODULE", "1") == "1"
+if not PACING_ON:
+    print("[INIT] Module F (Pacing) DISABLED via PACING_MODULE=0")
+
+# ── TEST vs PRODUCTION pacing thresholds ─────────────────────────────────
+PACING_TEST_MODE         = False  # ← set False before deployment
+
+if PACING_TEST_MODE:
+    PACING_WARMUP_S      = 15.0   # seconds before alerting is possible
+    PACING_MIN_REVERSALS = 2      # sharp U-turns required inside window
+else:
+    PACING_WARMUP_S      = 60.0
+    PACING_MIN_REVERSALS = 4
+
+PACING_WINDOW_S          = 60.0   # rolling time window for reversal counting
+PACING_MIN_REVERSAL_DX   = 0.05   # jitter filter — ignore steps < 5% frame width
+PACING_TURN_ANGLE_MIN    = 150.0  # degrees — minimum angle to count as a sharp U-turn
+PACING_EFFICIENCY_MAX    = 0.15   # displacement/distance ratio must stay below this
+PACING_SINUOSITY_MAX     = 1.8    # per-leg sinuosity ceiling (1.0 = perfectly straight)
+PACING_MIN_TOTAL_DIST    = 0.20   # minimum normalized total distance before evaluating
+PACING_COOLDOWN_S        = 300.0  # 5 min between repeat alerts for same track
 
 # ── Agitation / Inactivity disambiguation ─────────────────────────────────
 # Number of seconds a person must have been stationary (vel below
@@ -1267,13 +1001,7 @@ REASSOC_DEBUG       = os.getenv("REASSOC_DEBUG", "0") == "1"
 # a real FALL in the same spot is an upgrade, not a duplicate, so the higher
 # rank always passes and re-arms the window.
 FALL_DEDUP_ON     = os.getenv("FALL_DEDUP", "1") == "1"
-# 25s was sized against the old 60s prolonged-fall metronome and is far too
-# short now: the escalation ladder spans minutes, so a re-numbered track in the
-# same spot slipped past the window and started its own ladder. 180s covers the
-# first two rungs. Escalation still passes — a higher rank always goes through
-# and re-arms the window — so a lying-down that becomes a real fall is never
-# swallowed; only a same-or-lower rank repeat of the same patch of floor is.
-FALL_DEDUP_S      = float(os.getenv("FALL_DEDUP_S", "180"))
+FALL_DEDUP_S      = float(os.getenv("FALL_DEDUP_S", "25"))
 FALL_DEDUP_MIN_IOU = float(os.getenv("FALL_DEDUP_MIN_IOU", "0.25"))
 
 # ── Lying-down confirmation ──────────────────────────────────────────────────
@@ -1291,35 +1019,6 @@ FALL_DEDUP_MIN_IOU = float(os.getenv("FALL_DEDUP_MIN_IOU", "0.25"))
 # Fast falls (angle_rate >= FALL_RATE_THRESHOLD) bypass this timer entirely;
 # emergencies must alert as fast as the FALL_FRAMES_REQUIRED window allows.
 LYING_CONFIRM_SECONDS    = 3.0
-
-# ── Prolonged-fall re-alerting ───────────────────────────────────────────────
-# A person still on the floor after ten minutes IS worse news than one who has
-# been down for one, so this must keep escalating — going silent would be the
-# dangerous choice. But it used to re-fire on a fixed 60-second metronome with
-# no cap, which produced this, observed live:
-#
-#     10:39:55  [ID 2133] PROLONGED FALL (30s)
-#     10:47:56  [ID 2133] PROLONGED FALL (510s)
-#     10:48:56  [ID 2133] PROLONGED FALL (570s)
-#     10:49:56  [ID 2133] PROLONGED FALL (630s)
-#
-# Eleven notifications about one event, each carrying no information the
-# previous one lacked. That is alarm fatigue, and alarm fatigue is itself a
-# safety failure: a nurse who has learned to swipe these away is not reading
-# the one that matters.
-#
-# So it now escalates on MILESTONES instead of a timer. Each alert marks a
-# genuinely different clinical situation — a minute down, five minutes down,
-# half an hour down — and there are six of them in the first hour rather than
-# sixty. The HUD still shows the live counter continuously; only the
-# NOTIFICATIONS are thinned.
-#
-# Set PROLONGED_FALL_MAX_ALERTS=1 to notify once and never repeat.
-PROLONGED_FALL_AFTER_S = float(os.getenv("PROLONGED_FALL_AFTER_S", "30"))
-PROLONGED_FALL_STEPS_S = tuple(
-    float(s) for s in os.getenv(
-        "PROLONGED_FALL_STEPS_S", "120,300,900,1800,3600").split(",") if s.strip())
-PROLONGED_FALL_MAX_ALERTS = int(os.getenv("PROLONGED_FALL_MAX_ALERTS", "6"))
 
 # ── Persist a fallen person through detection loss ───────────────────────────
 # A body on the floor is the HARDEST thing for the detector to see, so the
@@ -1356,13 +1055,6 @@ PERSIST_DEBUG = os.getenv("PERSIST_DEBUG", "0") == "1"
 # consecutive frames before FALLEN commits, so this is a second filter on top
 # of an existing one — it only needs to reject a single-frame flicker.
 PERSIST_MIN_FALLEN_S = float(os.getenv("PERSIST_MIN_FALLEN_S", "0.3"))
-
-# Candidate frames a vanishing track must have supplied before promote_on_vanish
-# will commit it to FALLEN. 1 (the old value) meant a single flickering frame on
-# a ghost detection became a held fall, an alert cascade and a saved clip. 2 is
-# still below FALL_FRAMES_REQUIRED (3), so a genuine fall that loses its track
-# after two frames is still caught — it only rejects the single-frame flicker.
-PROMOTE_MIN_CANDIDATE_FRAMES = int(os.getenv("PROMOTE_MIN_CANDIDATE_FRAMES", "2"))
 
 # Keypoint indices (COCO-17)
 LEFT_SHOULDER,  RIGHT_SHOULDER  = 5,  6
@@ -1485,32 +1177,6 @@ HIP_FLEX_MIN_PLAUSIBLE  = float(os.getenv("HIP_FLEX_MIN_PLAUSIBLE", "25"))
 # evidence carries a larger allowance because the fold itself already rules
 # out lying flat.
 SEATED_TORSO_MAX_HIPFLEX = float(os.getenv("SEATED_TORSO_MAX_HIPFLEX", "75"))
-
-# ── Standing-bend guard ──────────────────────────────────────────────────────
-# Bending at the waist to pick something off the floor puts the torso at
-# 85-115 degrees from vertical, which Path A reads as a horizontal body. A
-# resident cleaning was reported as FALL DETECTED, and when she stayed bent
-# past LYING_CONFIRM_SECONDS the same state relabelled itself LYING DOWN.
-#
-# The seated guard cannot cover this. Bending keeps the knees straight, and
-# looks_seated() returns False as soon as it sees a straight leg — before the
-# hip-flexion test that would otherwise notice the folded waist.
-#
-# BEND_LEG_DROP_MIN is the hip-to-ankle vertical drop, in torso lengths,
-# above which the legs count as still extended beneath the body. See
-# standing_bend() for the measured values behind 1.2, and for the one pose it
-# deliberately misreads. Set BEND_GUARD=0 to switch it off.
-BEND_GUARD_ON      = os.getenv("BEND_GUARD", "1") == "1"
-BEND_LEG_DROP_MIN  = float(os.getenv("BEND_LEG_DROP_MIN", "1.2"))
-# Ankle-free fallback, used when the feet are hidden by furniture, by another
-# person, or by the frame edge — which is the case in every false alarm seen so
-# far. Shoulders below hip level AND knees below hips. See standing_bend() for
-# the measured table and for the two lying poses each condition alone gets
-# wrong. 0.60 rather than 0.50 on the knee drop keeps a margin above a
-# collapsed, slumped-forward body, which measured 0.41 and must stay detectable.
-BEND_TORSO_INVERT_MIN = float(os.getenv("BEND_TORSO_INVERT_MIN", "0.30"))
-BEND_KNEE_DROP_MIN    = float(os.getenv("BEND_KNEE_DROP_MIN", "0.60"))
-BEND_DEBUG         = os.getenv("BEND_DEBUG", "0") == "1"
 
 # ── Furniture zones — "lying down means ON THE FLOOR" ────────────────────────
 # Honest statement of the limit this works around: in an uncalibrated oblique
@@ -1743,138 +1409,6 @@ def looks_seated(kpts, torso_angle):
     return (torso_angle < SEATED_TORSO_MAX_HIPFLEX), False
 
 
-def pose_is_plausible(kpts):
-    """Could this skeleton belong to an actual human body?
-
-    DET_CONF is 0.10 so a person on the floor still registers. The cost is that
-    a dark armchair, a pile of laundry or a shadow can accumulate enough weak
-    keypoints to clear MIN_CONFIDENT_KPTS and be handed a track — and a track
-    is entitled to be classified, alerted on, and recorded. A red FALL DETECTED
-    box was observed sitting on an empty armchair with a tangle of lines in it
-    that no body could produce.
-
-    The discriminator is proportion. A real torso is never much shorter than
-    the shoulders are wide, whatever the camera angle. Measured:
-
-        standing, facing camera   2.67      ghost, scattered points   0.22
-        standing, side-on         9.92      ghost, wide and flat      0.10
-        seated                    2.40
-        lying flat across view    3.66
-        lying, foreshortened      1.72   <- the lowest any real pose reached
-        bent over                 3.46
-
-    1.72 versus 0.22 is an order of magnitude, so 0.6 sits in empty space with
-    a wide margin on both sides. Only the LOW end is tested: a high ratio is
-    what a genuine side-on person produces (9.92) and is not evidence of
-    anything wrong.
-
-    Returns True when unmeasurable — a missing measurement must never be
-    treated as proof of a ghost, for the same reason it must never be treated
-    as proof of a fall.
-    """
-    if not POSE_PLAUSIBILITY_ON or kpts is None:
-        return True
-    for i in (LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP):
-        if point_conf(kpts[i]) < POSE_CONF_THRESHOLD:
-            return True
-    shoulder_w = math.hypot(kpts[LEFT_SHOULDER][0] - kpts[RIGHT_SHOULDER][0],
-                            kpts[LEFT_SHOULDER][1] - kpts[RIGHT_SHOULDER][1])
-    if shoulder_w < 1e-3:
-        return True
-    sh_mid  = midpoint(kpts[LEFT_SHOULDER][:2], kpts[RIGHT_SHOULDER][:2])
-    hip_mid = midpoint(kpts[LEFT_HIP][:2],      kpts[RIGHT_HIP][:2])
-    torso_len = math.hypot(sh_mid[0] - hip_mid[0], sh_mid[1] - hip_mid[1])
-    return (torso_len / shoulder_w) >= POSE_MIN_TORSO_RATIO
-
-
-def standing_bend(kpts):
-    """True when the legs are still extended below the hips — bent over, but
-    standing on their feet. False when unmeasurable (fail open: never let a
-    missing measurement suppress a fall).
-
-    Measured as the vertical drop from hip midpoint to the LOWEST confident
-    ankle, divided by torso length, so the person's own body is the ruler and
-    camera distance cancels out. On synthetic skeletons:
-
-        standing upright            2.00
-        bending to pick something   2.09      <- the false positive
-        deep bend, hands to floor   1.97
-        sitting on a chair          1.00
-        kneeling                    0.81
-        collapsed, legs folded      0.43
-        lying flat across the view  0.16
-        lying, feet away from cam  -1.62
-
-    A threshold of 1.2 sits in the empty band between bending and everything
-    that is genuinely down, with ~60% margin either side.
-
-    THE ONE POSE THIS MISREADS, and why the caller must respect it: a body
-    lying with its FEET TOWARD THE CAMERA measures 1.59 — above the threshold —
-    because that pose foreshortens the torso and shrinks the denominator. It is
-    not a standing bend. That is why this may only gate Path A, whose torso-
-    angle condition that pose does not meet anyway (it projects near 0 degrees);
-    Paths B and C still catch it. Do not promote this to a global override.
-    """
-    if not BEND_GUARD_ON or kpts is None:
-        return False
-    for i in (LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP):
-        if point_conf(kpts[i]) < POSE_CONF_THRESHOLD:
-            return False
-    sh_mid  = midpoint(kpts[LEFT_SHOULDER][:2], kpts[RIGHT_SHOULDER][:2])
-    hip_mid = midpoint(kpts[LEFT_HIP][:2],      kpts[RIGHT_HIP][:2])
-    torso_len = math.hypot(sh_mid[0] - hip_mid[0], sh_mid[1] - hip_mid[1])
-    if torso_len < 1e-3:
-        return False
-    ankles = [kpts[i] for i in (LEFT_ANKLE, RIGHT_ANKLE)
-              if point_conf(kpts[i]) >= POSE_CONF_THRESHOLD]
-    if ankles:
-        ankle_y = max(float(a[1]) for a in ankles)
-        return ((ankle_y - hip_mid[1]) / torso_len) >= BEND_LEG_DROP_MIN
-
-    # ── Ankle-free fallback ──────────────────────────────────────────────────
-    # Requiring ankles made the guard abstain in precisely the cases it was
-    # built for. Every observed false alarm — bending over a table, reaching
-    # down to a chair, picking something off the floor at the frame edge — hid
-    # the feet under furniture, behind another resident, or outside the frame.
-    #
-    # Two conditions, and BOTH are needed:
-    #
-    #   inverted torso : the shoulders have dropped BELOW hip level. You fold
-    #                    at the waist to reach something; you cannot lie flat
-    #                    on a floor with your shoulders under your hips.
-    #   knees below hips: the legs are still hanging down, i.e. weight is on
-    #                    the feet.
-    #
-    # Either alone is unsafe, and the poses that prove it are in the table
-    # below (measured on synthetic skeletons, y increasing downward):
-    #
-    #                              torso inv   knee drop
-    #     bend over table              0.68        1.21   <- suppress
-    #     bend to pick up              0.69        0.94   <- suppress
-    #     bend over chair              0.86        1.06   <- suppress
-    #     lying prone, head to camera  1.00       -0.81   <- MUST NOT suppress
-    #     lying supine, feet to camera-0.99        0.92   <- MUST NOT suppress
-    #     collapsed, slumped forward   0.47        0.41   <- MUST NOT suppress
-    #     lying flat across view      -0.04        0.16
-    #     kneeling                    -1.00        0.62
-    #
-    # A body lying prone toward the camera inverts the torso by projection and
-    # would be masked by the first condition alone; its knees sit ABOVE the
-    # hips, so the second condition rejects it. A body lying feet-to-camera
-    # passes the knee test and fails the torso test. Requiring both leaves a
-    # clear margin around the collapsed case, which is the one that actually
-    # matters clinically.
-    knees = [kpts[i] for i in (LEFT_KNEE, RIGHT_KNEE)
-             if point_conf(kpts[i]) >= POSE_CONF_THRESHOLD]
-    if not knees:
-        return False          # neither feet nor knees — abstain, allow the fall
-    knee_y  = max(float(k[1]) for k in knees)
-    inverted = (sh_mid[1]  - hip_mid[1]) / torso_len
-    knee_drop = (knee_y    - hip_mid[1]) / torso_len
-    return (inverted  >= BEND_TORSO_INVERT_MIN and
-            knee_drop >= BEND_KNEE_DROP_MIN)
-
-
 def _iou(a, b):
     """Intersection-over-union of two (x1, y1, x2, y2) boxes; 0.0 if either
     is None. Used both to re-link a switched track ID to the box it just
@@ -2059,79 +1593,11 @@ def smooth_keypoints(kpt_smooth: dict, tid: int, raw_kpts) -> np.ndarray:
     return blended
 
 
-# ── Overlay weights scale with how big the person is on screen ───────────────
-# Every box was 2-5 px thick and every joint a 4 px disc, regardless of whether
-# the person filled the frame or stood across the room. On a wide shot of a
-# lounge with eight residents the far ones disappeared under their own
-# skeletons — the dots merged into a green blob and you could not tell where
-# one person ended and the next began.
-#
-# Line weight now follows apparent size: a person occupying OVERLAY_SCALE_REF
-# of the frame height gets the MAX weights, someone much smaller gets the MIN.
-# Severity still reads at a glance because the box keeps its priority bump.
-#
-# OVERLAY_SCALE is the single knob — 0.8 for thinner everywhere, 1.3 for
-# heavier — and the MIN/MAX pairs are there if you want finer control.
-# 0.7, not 1.0. At 1.0 a nearby person still got 2 px bones and 2 px joints,
-# which on a 640x360 stream upscaled ~1.6x by the browser reads as 3-4 px on
-# screen — still a blob in a seven-person frame. At 0.7 everything below an
-# emergency lands on 1 px. This is close to the practical floor: 1 px is the
-# thinnest line OpenCV draws. Raise it if the skeleton becomes too faint.
-OVERLAY_SCALE      = float(os.getenv("OVERLAY_SCALE", "0.7"))
-# Raised from 0.55: a person has to be genuinely close before they earn the
-# heavy end of the scale, so everyone at conversational distance and beyond
-# now sits on the thin end rather than the middle.
-OVERLAY_SCALE_REF  = float(os.getenv("OVERLAY_SCALE_REF", "0.75"))
-OVERLAY_BOX_T_MIN  = float(os.getenv("OVERLAY_BOX_T_MIN",  "1"))
-OVERLAY_BOX_T_MAX  = float(os.getenv("OVERLAY_BOX_T_MAX",  "2"))
-OVERLAY_BONE_T_MIN = float(os.getenv("OVERLAY_BONE_T_MIN", "1"))
-OVERLAY_BONE_T_MAX = float(os.getenv("OVERLAY_BONE_T_MAX", "2"))
-OVERLAY_JOINT_R_MIN = float(os.getenv("OVERLAY_JOINT_R_MIN", "1"))
-OVERLAY_JOINT_R_MAX = float(os.getenv("OVERLAY_JOINT_R_MAX", "2"))
-OVERLAY_FONT_MIN   = float(os.getenv("OVERLAY_FONT_MIN", "0.28"))
-OVERLAY_FONT_MAX   = float(os.getenv("OVERLAY_FONT_MAX", "0.42"))
-# The diagnostic captions — "seated L85/R83", "on Bench", "e=.. c=..",
-# "Body agi:", "BENDING (on feet)". They explain WHY a track is classified the
-# way it is, which is invaluable while tuning and pure clutter once you trust
-# it: on a seven-person frame they overlap each other and the skeletons.
-# They now scale with distance like everything else; set OVERLAY_DEBUG_TEXT=0
-# for a clean view showing only boxes, skeletons, IDs and status labels.
-# Default OFF. These were left on as a tuning aid, but on a seven-person frame
-# they overlap each other and the skeletons and are most of what "obstructing"
-# actually means. Set OVERLAY_DEBUG_TEXT=1 to bring them back while tuning.
-OVERLAY_DEBUG_TEXT = os.getenv("OVERLAY_DEBUG_TEXT", "0") == "1"
-
-
-def overlay_weights(bbox_h, frame_h, prio=0):
-    """(box_thickness, bone_thickness, joint_radius, font_scale) for a track.
-
-    Interpolates between the MIN and MAX constants on apparent size, so a
-    distant person is drawn with hairlines and small joints while someone
-    close keeps a readable overlay. The box gains +1 for a warning and +2 for
-    an emergency AFTER scaling, so a red box is never as faint as a green one
-    however far away it is — severity must survive the shrinking.
-    """
-    ref = max(1.0, float(frame_h) * OVERLAY_SCALE_REF)
-    s   = min(1.0, max(0.0, float(bbox_h or 0) / ref))
-    def _lerp(lo, hi):
-        return lo + (hi - lo) * s
-    box   = int(round(_lerp(OVERLAY_BOX_T_MIN,   OVERLAY_BOX_T_MAX)   * OVERLAY_SCALE))
-    bone  = int(round(_lerp(OVERLAY_BONE_T_MIN,  OVERLAY_BONE_T_MAX)  * OVERLAY_SCALE))
-    joint = int(round(_lerp(OVERLAY_JOINT_R_MIN, OVERLAY_JOINT_R_MAX) * OVERLAY_SCALE))
-    font  = _lerp(OVERLAY_FONT_MIN, OVERLAY_FONT_MAX) * OVERLAY_SCALE
-    if   prio >= 7: box += 2
-    elif prio >= 4: box += 1
-    return max(1, box), max(1, bone), max(1, joint), max(0.28, font)
-
-
-def draw_pose_overlay(frame, kpts, color=None, bone_t=2, joint_r=4):
+def draw_pose_overlay(frame, kpts, color=None):
     """Skeleton overlay. `color` (BGR) ties the joints and bones to the track's
     status so the skeleton, the box and the HUD all say the same thing; the
     joints are drawn in a lightened version so they stay readable against the
-    bones. Passing None keeps the original cyan/yellow scheme.
-
-    `bone_t` / `joint_r` come from overlay_weights() at the call sites; the
-    defaults reproduce the old fixed weights for any other caller."""
+    bones. Passing None keeps the original cyan/yellow scheme."""
     skeleton = [
         (0,1),(0,2),(1,3),(2,4),(5,6),(5,7),(7,9),(6,8),
         (8,10),(5,11),(6,12),(11,12),(11,13),(13,15),(12,14),(14,16)
@@ -2145,12 +1611,12 @@ def draw_pose_overlay(frame, kpts, color=None, bone_t=2, joint_r=4):
                 frame,
                 (int(kpts[a][0]), int(kpts[a][1])),
                 (int(kpts[b][0]), int(kpts[b][1])),
-                bone_c, bone_t
+                bone_c, 2
             )
     # Joints last so they sit on top of the bones rather than under them.
     for kp in kpts:
         if kp[2] > POSE_CONF_THRESHOLD:
-            cv2.circle(frame, (int(kp[0]), int(kp[1])), joint_r, joint_c, -1)
+            cv2.circle(frame, (int(kp[0]), int(kp[1])), 4, joint_c, -1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Module D — Body-Based Agitation Scorer
@@ -2314,6 +1780,149 @@ class BodyAgitationScorer:
             self._body_grace_since = None
             return "AGITATION_RISK"
         return None
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module F — Pacing Detector
+# ─────────────────────────────────────────────────────────────────────────────
+class PacingDetector:
+    """
+    Evidence-based pacing detector using three spatial geometry metrics
+    validated in clinical AI literature (2022–2026):
+
+      1. Sharp turn angle >= 150° per reversal — filters gradual curves and
+         gait noise from genuine U-turns (vs. the old sign-change approach).
+      2. Displacement-to-distance efficiency ratio < 0.15 — confirms the
+         person covered large total distance but negligible net displacement.
+      3. Per-leg sinuosity S < PACING_SINUOSITY_MAX — each transit leg between
+         reversals should be nearly linear (S = 1.0). High S = wandering.
+
+    Tracks 2D centroid (x, y) instead of x-only so turn angles are accurate.
+    All three metrics plus warmup and cooldown must hold to fire an alert.
+    """
+
+    def __init__(self, frame_w=640, frame_h=480, label="CAM"):
+        self.fw    = frame_w
+        self.fh    = frame_h
+        self.label = label
+        self._positions        = deque(maxlen=int(PACING_WINDOW_S * 30) + 30)
+        self._track_started_at = None
+        self._last_alert       = 0.0
+
+    def reset(self):
+        """Clear all state. Called when a fall fires on the same track to
+        prevent pre-fall walk positions from triggering a spurious pacing alert
+        after the person is already on the floor."""
+        self._positions.clear()
+        self._track_started_at = None
+
+    def update(self, center_px, now):
+        """
+        Returns (pacing_score 0..1, alert_or_None).
+        center_px: (pixel_x, pixel_y) bbox centroid from ByteTrack.
+        """
+        if self._track_started_at is None:
+            self._track_started_at = now
+
+        cx = center_px[0] / self.fw
+        cy = center_px[1] / self.fh
+        self._positions.append((cx, cy, now))
+
+        cutoff = now - PACING_WINDOW_S
+        while self._positions and self._positions[0][2] < cutoff:
+            self._positions.popleft()
+
+        if len(self._positions) < 6:
+            return 0.0, None
+
+        sharp_reversals, efficiency, avg_sinuosity = self._compute_metrics()
+        score = float(min(1.0, sharp_reversals / max(1, PACING_MIN_REVERSALS)))
+
+        track_age = now - self._track_started_at
+        if track_age < PACING_WARMUP_S:
+            return score, None
+
+        if (sharp_reversals >= PACING_MIN_REVERSALS
+                and avg_sinuosity < PACING_SINUOSITY_MAX
+                and now - self._last_alert > PACING_COOLDOWN_S):
+            self._last_alert = now
+            print(f"[PACING {self.label}] {sharp_reversals} sharp reversals | "
+                  f"efficiency={efficiency:.3f} | sinuosity={avg_sinuosity:.2f} → alert")
+            return score, "PACING DETECTED"
+
+        return score, None
+
+    def _compute_metrics(self):
+        """
+        Returns (sharp_reversals, efficiency_ratio, avg_leg_sinuosity).
+
+        Filters jitter steps first, then:
+        - Walks consecutive displacement vectors, counts angle >= 150° as a
+          sharp reversal, and records the index of each reversal point.
+        - Computes per-leg sinuosity (D_total / D_straight) for each segment
+          between reversal points — S=1.0 is a perfectly straight leg.
+        - Computes overall efficiency ratio (net_displacement / total_distance)
+          over the full window — approaches 0 for pacing.
+        """
+        raw   = list(self._positions)
+        valid = [raw[0]]
+        for p in raw[1:]:
+            if np.hypot(p[0] - valid[-1][0], p[1] - valid[-1][1]) >= PACING_MIN_REVERSAL_DX:
+                valid.append(p)
+
+        if len(valid) < 4:
+            return 0, 1.0, 999.0
+
+        # ── Sharp reversals + reversal index map ──────────────────────────
+        reversal_at     = [0]
+        sharp_reversals = 0
+
+        for i in range(2, len(valid)):
+            v1 = (valid[i-1][0] - valid[i-2][0], valid[i-1][1] - valid[i-2][1])
+            v2 = (valid[i][0]   - valid[i-1][0], valid[i][1]   - valid[i-1][1])
+            n1 = np.hypot(v1[0], v1[1])
+            n2 = np.hypot(v2[0], v2[1])
+            if n1 < 1e-9 or n2 < 1e-9:
+                continue
+            cos_t = np.clip((v1[0]*v2[0] + v1[1]*v2[1]) / (n1 * n2), -1.0, 1.0)
+            if np.degrees(np.arccos(cos_t)) >= PACING_TURN_ANGLE_MIN:
+                sharp_reversals += 1
+                reversal_at.append(i - 1)
+
+        reversal_at.append(len(valid) - 1)
+
+        # ── Per-leg sinuosity ─────────────────────────────────────────────
+        # Skip the last entry in reversal_at — it is always len(valid)-1
+        # (the current frame), meaning the final "leg" is incomplete. Its
+        # sinuosity is unreliable: the centroid noise over a short partial
+        # leg inflates the ratio and blocks valid pacing alerts.
+        leg_sinuosities = []
+        for j in range(1, len(reversal_at) - 1):
+            seg = valid[reversal_at[j-1]: reversal_at[j] + 1]
+            if len(seg) < 2:
+                continue
+            seg_total    = sum(np.hypot(seg[k][0] - seg[k-1][0],
+                                        seg[k][1] - seg[k-1][1])
+                               for k in range(1, len(seg)))
+            seg_straight = np.hypot(seg[-1][0] - seg[0][0],
+                                    seg[-1][1] - seg[0][1])
+            if seg_straight > 1e-6 and seg_total > 1e-6:
+                leg_sinuosities.append(seg_total / seg_straight)
+
+        avg_sinuosity = float(np.mean(leg_sinuosities)) if leg_sinuosities else 999.0
+
+        # ── Efficiency ratio ──────────────────────────────────────────────
+        total_dist = sum(np.hypot(valid[i][0] - valid[i-1][0],
+                                  valid[i][1] - valid[i-1][1])
+                         for i in range(1, len(valid)))
+        if total_dist < PACING_MIN_TOTAL_DIST:
+            return sharp_reversals, 1.0, avg_sinuosity
+
+        net_disp   = np.hypot(valid[-1][0] - valid[0][0],
+                              valid[-1][1] - valid[0][1])
+        efficiency = net_disp / total_dist
+
+        return sharp_reversals, efficiency, avg_sinuosity
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Module E — Movement Tracker
@@ -2500,17 +2109,12 @@ class FallStateMachine:
         # Set when the unwitnessed-fall path was deferred for want of track
         # history; the confirm timer then fires it as a FALL, not a lie-down.
         self._unwitnessed_pending = False
-        # Prolonged-fall escalation: how many notices this fall has produced,
-        # and the elapsed-seconds mark the next one is due at.
-        self._prolonged_sent = 0
-        self._prolonged_due  = PROLONGED_FALL_AFTER_S
         # Name of the furniture zone the person was last resting in, or None.
         self._furniture = None
 
     def update(self, angle, aspect_ratio, has_kpts, now, bbox_h=0,
                posture=(None, None), seated=False, seated_deep=False,
-               furniture=None, center_y=None, extent_ratio=None,
-               bend=False):
+               furniture=None, center_y=None, extent_ratio=None):
         """
         angle:        torso angle from vertical (degrees)
         aspect_ratio: bbox height / width
@@ -2525,10 +2129,6 @@ class FallStateMachine:
                       gate. None disables the gate for this track (fail open).
         extent_ratio: body_extent_ratio() — bbox height in torso lengths.
                       None means unmeasurable, and the Path B gate abstains.
-        bend:         standing_bend() — True when the legs are still extended
-                      below the hips, i.e. bent over but on their feet.
-                      Suppresses Path A only. Defaults False so any other
-                      caller behaves exactly as before.
         Returns (state_string, alert_type_or_None)
         """
         self._furniture = furniture
@@ -2641,35 +2241,13 @@ class FallStateMachine:
                   and aspect_ratio < FALL_PATH_B_ASPECT_MAX
                   and (extent_ratio is None or extent_ratio < FALL_EXTENT_MAX))
 
-        # Path A, with the standing-bend exception.
-        #
-        # Path A reads a large torso angle as "horizontal body". Bending at the
-        # waist to pick something up produces exactly that — 85-115 degrees —
-        # while the person is still on their feet, so a cleaner reaching for
-        # something off the floor was reported as a fall, and if she stayed
-        # bent for LYING_CONFIRM_SECONDS the confirm timer relabelled it
-        # LYING DOWN. The seated guard cannot catch this: bending leaves the
-        # knees straight, and looks_seated() returns False the moment it sees
-        # a straight leg, before the hip-flexion test can run.
-        #
-        # standing_bend() supplies the missing fact — the legs are still
-        # extended below the hips, i.e. the person is standing up.
-        #
-        # Deliberately scoped to Path A ONLY, not a global override, because
-        # the same measurement misreads a body lying with its FEET TOWARD THE
-        # CAMERA: that pose foreshortens the torso, shrinking the denominator
-        # until the legs look extended (measured 1.59, above the threshold).
-        # That pose has a torso angle near 0 so Path A was never firing on it,
-        # and it is caught by Path B/C instead — which this leaves alone.
-        path_a = (angle > FALL_ANGLE_THRESHOLD and aspect_ratio < 1.3
-                  and not bend)
-
         on_furniture = furniture is not None
         if on_furniture and FURNITURE_MODE == "all" and self._state != self.FALLEN:
             raw = self.NORMAL
         elif seated_now and self._state != self.FALLEN:
             raw = self.NORMAL
-        elif path_a or path_b or path_c:
+        elif (angle > FALL_ANGLE_THRESHOLD and aspect_ratio < 1.3) or \
+                path_b or path_c:
             raw = self.FALLEN
         elif angle > STUMBLE_ANGLE_THRESHOLD:
             raw = self.STUMBLE
@@ -2701,10 +2279,6 @@ class FallStateMachine:
         else:
             self._fallen_since = None
             self._unwitnessed_pending = False
-            # They got up. A LATER fall is a new event and deserves the full
-            # escalation again, so rearm here rather than at alert time.
-            self._prolonged_sent = 0
-            self._prolonged_due  = PROLONGED_FALL_AFTER_S
             # Person left FALLEN before the lying-confirm window elapsed —
             # this is exactly what the timer is for: their "fall" was
             # transient (a bend, a partial slump that recovered) and should
@@ -2735,27 +2309,7 @@ class FallStateMachine:
         """
         if self._state == self.FALLEN:
             return False
-        # EVIDENCE BAR. This used to accept `_candidate_count >= 1` from a
-        # track of any age, which is how the facility got ~80 phantom clips.
-        # At DET_CONF 0.10 the detector mints tracks on shadows, chair backs
-        # and half-occluded limbs; such a track lives a frame or two, its junk
-        # keypoints happen to read as horizontal, and it vanishes. That was
-        # enough to commit it to FALLEN and hold it for FALLEN_TIMEOUT_S,
-        # which is long enough to emit LYING DOWN plus two PROLONGED FALL
-        # notices and open an incident clip — per ghost, and the ID counter
-        # was in the tens of thousands.
-        #
-        # Promotion exists for a REAL fall whose track dies mid-descent, and a
-        # real fall supplies more than one frame and comes from a track that
-        # existed before it fell. Demanding both costs nothing on the genuine
-        # case and removes the ghost case entirely.
-        if self._candidate != self.FALLEN or \
-                self._candidate_count < PROMOTE_MIN_CANDIDATE_FRAMES:
-            return False
-        if not self._has_enough_history(now):
-            if PERSIST_DEBUG:
-                print(f"[PERSIST] refusing to promote a {self._track_age(now):.1f}s / "
-                      f"{self._frames_seen}-frame track — too new to trust")
+        if self._candidate != self.FALLEN or self._candidate_count < 1:
             return False
         # Last seen supported by furniture — the disappearance of someone
         # sitting on a sofa is not evidence of a collapse, it is evidence the
@@ -2851,12 +2405,6 @@ class FallStateMachine:
         self._first_seen          = other._first_seen
         self._frames_seen         = other._frames_seen
         self._unwitnessed_pending = other._unwitnessed_pending
-        # Carry the escalation state too. Without this a ByteTrack ID switch
-        # rearms the whole ladder, and the same body on the same floor starts
-        # its notifications again from zero under a new number — which is the
-        # spam this was written to stop, arriving by a different route.
-        self._prolonged_sent      = other._prolonged_sent
-        self._prolonged_due       = other._prolonged_due
         self._furniture           = other._furniture
         if getattr(other, "last_box", None) is not None:
             self.last_box = other.last_box
@@ -3103,26 +2651,12 @@ class FallStateMachine:
             # Independent of the lying-confirm path: triggers for any fall
             # (fast or slow) that has persisted >30s. Guard against firing
             # twice on the same frame as the lying-confirm above.
-            # Escalates on milestones, not on a metronome — see
-            # PROLONGED_FALL_STEPS_S for why, and for the log that prompted it.
             if alert is None and self._furniture is None:
                 elapsed = now - self._fallen_since
-                if (elapsed >= self._prolonged_due
-                        and self._prolonged_sent < PROLONGED_FALL_MAX_ALERTS):
+                if elapsed > 30 and now - self._last_fall_alert_time >= 60:
                     alert = f"PROLONGED FALL ({int(elapsed)}s)"
                     self._last_fall_alert_time = now
                     self._last_fall_label = alert
-                    self._prolonged_sent += 1
-                    # Next milestone strictly beyond where we already are, so a
-                    # detection gap that resumes at 900s cannot replay 120s and
-                    # 300s back to back.
-                    self._prolonged_due = next(
-                        (s for s in PROLONGED_FALL_STEPS_S if s > elapsed),
-                        float("inf"))
-                    print(f"[FALL SM] ⏱ prolonged fall notice "
-                          f"{self._prolonged_sent}/{PROLONGED_FALL_MAX_ALERTS} "
-                          f"at {int(elapsed)}s; next at "
-                          f"{self._prolonged_due if self._prolonged_due != float('inf') else 'never'}")
 
         return alert
 
@@ -3161,49 +2695,6 @@ def _fall_alert_is_duplicate(cam_id, detection, box, now):
     return False
 
 
-# ── Circuit breaker on alert volume ──────────────────────────────────────────
-# Every other guard in this file fixes a specific CAUSE of spurious alerts —
-# the prolonged-fall ladder, the ghost-promotion bar, the stale-frame halt, the
-# time-jump reset. Each was a real bug. But fixing causes one at a time means
-# the next unknown cause floods the system again, and the operator waits
-# another day for another patch.
-#
-# This bounds the damage instead of the cause. Past ALERT_MAX_PER_HOUR alerts
-# from one camera in a rolling hour, something is wrong with the DETECTOR, not
-# with the facility — no real ward produces twelve emergencies an hour. Further
-# alerts are dropped and a single loud notice goes out in their place.
-#
-# THE TRADE, stated plainly because it is a safety decision and not a technical
-# one: while the breaker is open, a genuine fall WILL be missed. That is
-# accepted because the alternative is fifty unread notifications, which is
-# equally missed and additionally trains staff to ignore the system. The open
-# breaker is itself an alert, and it says the thing that is actually true:
-# this camera's detection cannot be trusted right now, go and look.
-#
-# Set ALERT_MAX_PER_HOUR=0 to disable.
-ALERT_MAX_PER_HOUR = int(os.getenv("ALERT_MAX_PER_HOUR", "12"))
-_alert_times   = {}     # cam_id -> [timestamps]
-_alert_tripped = {}     # cam_id -> bool, so the notice is sent once per hour
-_alert_lock    = threading.Lock()
-
-
-def _alert_budget_ok(cam_id, now):
-    """(allowed, first_trip). first_trip is True on the frame the breaker opens,
-    so exactly one 'suppressing' notice reaches the dashboard."""
-    if ALERT_MAX_PER_HOUR <= 0:
-        return True, False
-    with _alert_lock:
-        recent = [t for t in _alert_times.get(cam_id, ()) if now - t < 3600]
-        _alert_times[cam_id] = recent
-        if len(recent) >= ALERT_MAX_PER_HOUR:
-            first = not _alert_tripped.get(cam_id)
-            _alert_tripped[cam_id] = True
-            return False, first
-        _alert_tripped[cam_id] = False
-        recent.append(now)
-        return True, False
-
-
 def send_alert(cam_id, alert_type, message, detection=None, track_id=None,
                box=None):
     """Emit alert via Socket.IO to the Node.js backend, and (subject to a
@@ -3224,25 +2715,6 @@ def send_alert(cam_id, alert_type, message, detection=None, track_id=None,
         print(f"[DEDUP] [{cam_id}] suppressed duplicate {detection}: {message}")
         return
 
-    # Circuit breaker. Last line of defence, cause-agnostic: whatever is
-    # generating them, one camera does not legitimately raise more than
-    # ALERT_MAX_PER_HOUR alerts in an hour. See _alert_budget_ok.
-    _allowed, _first_trip = _alert_budget_ok(cam_id, now)
-    if not _allowed:
-        print(f"[BREAKER] [{cam_id}] alert rate limit "
-              f"({ALERT_MAX_PER_HOUR}/hour) exceeded — dropping {detection}: "
-              f"{message}")
-        if not _first_trip:
-            return
-        # Replace the flood with ONE notice that says what is actually wrong.
-        message   = (f"DETECTION FAULT — {ALERT_MAX_PER_HOUR}+ alerts in one "
-                     f"hour from this camera. Alerts suppressed; verify the "
-                     f"camera and the room directly.")
-        alert_type = "WARNING"
-        detection  = None
-        track_id   = None
-        box        = None
-
     # alertKey lets the backend match the deferred `cctv_alert_clip` payload
     # to the Incident document this alert created. We hand the same key to
     # both sides; the backend uses (location, alertKey) as a join.
@@ -3252,7 +2724,7 @@ def send_alert(cam_id, alert_type, message, detection=None, track_id=None,
         "type":      alert_type,
         "message":   message,
         "location":  cam_id,
-        "timestamp": clock_str(fmt="%I:%M:%S %p"),
+        "timestamp": time.strftime("%I:%M:%S %p"),
         "alertKey":  alert_key,
     }
 
@@ -3297,16 +2769,6 @@ def send_alert(cam_id, alert_type, message, detection=None, track_id=None,
     if live >= CLIP_MAX_CONCURRENT:
         print(f"[CLIP] {cam_id}: {live} recordings already open, skipping clip "
               f"for ID {track_id} ({safe_type}) — alert still sent")
-        return
-
-    # Rolling-hour budget. Bounds disk usage regardless of what the detector
-    # does upstream. Alert already sent above; only the video is skipped.
-    if not _clip_budget_ok(cam_id, now):
-        print(f"[CLIP] {cam_id}: clip budget reached "
-              f"({CLIP_MAX_PER_HOUR}/hour, {CLIP_MAX_PER_DAY}/day) — skipping "
-              f"clip for ID {track_id} ({safe_type}). Alert still sent. "
-              f"If you see this repeatedly, the detector is generating "
-              f"incidents faster than it should.")
         return
 
     # Deterministic filename: <cam>_<label>_<YYYYMMDD_HHMMSS>_<key>.mp4
@@ -3357,7 +2819,7 @@ def capture_thread(cam_id, source):
             # For video file sources, loop back to the start instead of
             # treating end-of-file as a camera failure. This keeps the
             # browser feed alive during testing and lets time-based detectors
-            # (inactivity) accumulate state across the full clip.
+            # (inactivity, pacing) accumulate state across the full clip.
             if _is_file_source:
                 print(f"[CAPTURE {cam_id}] Video file ended — sending blank frames to clear detections...")
                 # Pump a BLACK frame (not the last real frame) so YOLO sees no
@@ -3465,8 +2927,8 @@ def reassociate_tracks(cam_id, boxes_by_tid, fall_machines, last_seen,
             new_sm.adopt_from(old_sm)
         fall_machines[new_tid] = new_sm
         # Carry the behavioural detectors too. Their rolling windows are what
-        # make inactivity mean anything, and resetting them on every ID switch
-        # is how a still resident kept escaping the inactivity check.
+        # make pacing and inactivity mean anything, and resetting them on every
+        # ID switch is how a wandering resident kept escaping the pacing check.
         for d in carry_dicts:
             if old_tid in d:
                 d[new_tid] = d.pop(old_tid)
@@ -3520,6 +2982,7 @@ STATUS_STYLES = [
     ("LYING DOWN",                       6, (0, 140, 255)),
     ("STUMBLE DETECTED",                 4, (0, 165, 255)),
     ("AGITATION_RISK",                   3, (0,  60, 200)),
+    ("PACING DETECTED",                  2, (200, 100, 0)),
     # Benign, but worth showing as distinct from plain NORMAL: the person is
     # accounted for and resting on furniture, not unmonitored.
     ("ON ",                              1, (180, 150,  70)),
@@ -3594,15 +3057,13 @@ def process_camera_thread(cam_id):
     # Per-track state — created on first sight, GC'd after TRACK_TIMEOUT_S.
     fall_machines     = {}   # track_id → FallStateMachine
     body_agi_scorers  = {}   # track_id → BodyAgitationScorer
+    pacing_detectors  = {}   # track_id → PacingDetector
     movement_trackers = {}   # track_id → MovementTracker
     last_seen         = {}   # track_id → wall-clock timestamp
     last_behavior_per = {}   # track_id → last body-agitation alert string (debounce)
+    last_pacing_per   = {}   # track_id → last pacing alert string (debounce)
     last_movement_per = {}   # track_id → last movement alert string (debounce)
     kpt_smooth        = {}   # track_id → np.ndarray (17,3) EMA-smoothed keypoints
-    # Gate bookkeeping — see the stale-frame and low-light checks in the loop.
-    last_stale_log    = 0.0
-    last_dark_log     = 0.0
-    dark_now          = False
 
     def state_for(d, track_id, factory):
         if track_id not in d:
@@ -3623,111 +3084,6 @@ def process_camera_thread(cam_id):
 
         # Capture timestamp, not inference timestamp. See capture_thread comment.
         now = capture_ts
-
-        # ── Is this frame still live, or is the camera gone? ─────────────────
-        # THE BUG THIS FIXES, and it is a bad one. capture_thread never clears
-        # raw_frames on a read failure — it retries the connection and leaves
-        # the last good frame sitting there. So when the camera is switched
-        # off, unplugged, or the RTSP link drops, the inference thread keeps
-        # re-running YOLO on that ONE frozen frame, forever, at full rate.
-        #
-        # Everyone who happened to be in the last frame stays "detected"
-        # indefinitely. They never move, so the inactivity timer runs; tracks
-        # churn on the static image; alerts and clips keep being produced from
-        # a camera that has been off for hours. That is how a shut-down system
-        # kept filling S3 overnight.
-        #
-        # camera_health() already knew about this — /status reports a camera
-        # offline after CAMERA_STALE_AFTER_S — but nothing told the inference
-        # loop. Now it does.
-        frame_age = time.time() - (capture_ts or 0)
-        if frame_age > CAMERA_STALE_AFTER_S:
-            if now - last_stale_log > 60:
-                last_stale_log = now
-                print(f"[STALE {cam_id}] last frame is {frame_age:.0f}s old — "
-                      f"camera is not delivering. Inference halted; no alerts "
-                      f"or clips will be produced until it returns.")
-            stale_frame = frame.copy()
-            draw_status_bar(stale_frame, cam_id, "CAMERA OFFLINE — NO SIGNAL",
-                            (120, 120, 120), clock=clock_str())
-            with lock:
-                cam_frames[cam_id] = stale_frame
-                cam_clean[cam_id] = (frame, ())
-            time.sleep(0.5)
-            continue
-        # ── Frames came back after a gap: wipe per-track state ───────────────
-        # THIS is what flooded S3 overnight, and it is nastier than the frozen
-        # frame on its own.
-        #
-        # Every timer in this system is measured against `now`, which is the
-        # CAPTURE timestamp. While the camera was off, capture_ts never
-        # advanced, so `now` was frozen at the last live frame: elapsed times
-        # stopped growing, cooldowns stopped expiring, and nothing fired. That
-        # is the silence from 10pm to 3am — not the system being off, the
-        # system being stuck.
-        #
-        # Then the camera returned and `now` jumped forward six hours in a
-        # single frame. Every comparison detonated at once:
-        #   now - _fallen_since        -> 21600s, so PROLONGED FALL fired
-        #                                 instantly for every held track
-        #   now - _last_fall_alert_time-> 21600s, so every cooldown was expired
-        #   now - last_seen            -> every track stale at the same instant
-        # A six-hour jump makes the whole state machine believe six hours of
-        # emergency happened in one frame. Hence the 4am flood.
-        #
-        # After a gap this long the old state means nothing — whoever was in
-        # frame is long gone. Start clean instead of carrying stale timestamps
-        # into fresh time.
-        if last_stale_log:
-            gap = frame_age
-            print(f"[STALE {cam_id}] frames flowing again after a gap — "
-                  f"discarding {len(fall_machines)} stale track state(s) so "
-                  f"old timers cannot fire against the new clock")
-            fall_machines.clear();     body_agi_scorers.clear()
-            movement_trackers.clear(); last_seen.clear()
-            last_behavior_per.clear(); last_movement_per.clear()
-            kpt_smooth.clear()
-            with clip_buffer_lock:
-                clip_buffers[cam_id].clear()   # pre-roll is from before the gap
-            last_stale_log = 0.0
-
-        # ── Too dark to trust? ───────────────────────────────────────────────
-        # An unattended overnight run produced a stream of phantom falls and
-        # roughly sixty clips of an empty room. DET_CONF is 0.10 so a body on
-        # the floor still registers, and in a dark frame that same floor lets
-        # sensor noise, furniture edges and IR glare assemble into skeletons.
-        # Those ghosts are then entitled to everything a person gets: alerts,
-        # a held FALLEN state, an incident, a clip.
-        #
-        # Deliberately keyed on BRIGHTNESS, not on the clock. Night falls are
-        # the most dangerous ones, so gating by hours would be indefensible —
-        # but acting on a frame too dark to see is worse than not acting,
-        # because it buries real alerts under noise. If the lights are on, this
-        # never engages regardless of the hour.
-        if NIGHT_GATE_ON:
-            lum = float(np.mean(frame)) if frame is not None else 0.0
-            if dark_now:
-                dark_now = lum < (NIGHT_GATE_LUMA + NIGHT_GATE_HYST)
-            else:
-                dark_now = lum < NIGHT_GATE_LUMA
-            if dark_now:
-                if now - last_dark_log > 300:
-                    last_dark_log = now
-                    print(f"[NIGHT {cam_id}] scene luminance {lum:.1f} < "
-                          f"{NIGHT_GATE_LUMA} — inference paused, no alerts or "
-                          f"clips will be produced until it brightens")
-                dark_frame = frame.copy()
-                draw_status_bar(dark_frame, cam_id, "TOO DARK — MONITORING PAUSED",
-                                (120, 120, 120), clock=clock_str())
-                with lock:
-                    cam_frames[cam_id] = dark_frame
-                    cam_clean[cam_id] = (frame, ())
-                time.sleep(0.2)
-                continue
-            elif last_dark_log:
-                print(f"[NIGHT {cam_id}] luminance {lum:.1f} — inference resumed")
-                last_dark_log = 0.0
-
         # persist=True keeps the tracker's track table across calls within this
         # thread. ByteTrack (swapped from BoT-SORT) maintains tracks across
         # occlusion using low-confidence detections that BoT-SORT discards —
@@ -3778,8 +3134,8 @@ def process_camera_thread(cam_id):
             cam_id,
             {o["tid"]: tuple(map(int, o["box"].xyxy[0])) for o in observations},
             fall_machines, last_seen,
-            (body_agi_scorers, movement_trackers,
-             last_behavior_per, last_movement_per, kpt_smooth),
+            (body_agi_scorers, pacing_detectors, movement_trackers,
+             last_behavior_per, last_pacing_per, last_movement_per, kpt_smooth),
             now,
         )
 
@@ -3790,10 +3146,6 @@ def process_camera_thread(cam_id):
         # ── HUD aggregator: worst status across all visible tracks ────────
         worst_status = "NO PERSON" if not observations else "NORMAL"
 
-        # What was detected this frame, kept separately from the drawing so a
-        # saved clip can be repainted for one subject. See CLIP_ISOLATE_SUBJECT.
-        frame_records = []
-
         for obs in observations:
             tid  = obs["tid"]
             kpts = obs["kpts"]
@@ -3803,6 +3155,8 @@ def process_camera_thread(cam_id):
             # Get-or-create per-track state
             fall_sm     = state_for(fall_machines,     tid, FallStateMachine)
             body_agi_sc = state_for(body_agi_scorers,  tid, BodyAgitationScorer)
+            pacing_det  = state_for(pacing_detectors,  tid,
+                                    lambda: PacingDetector(INFERENCE_W, INFERENCE_H, label=f"{cam_id}#{tid}"))
             movement_tr = state_for(movement_trackers, tid,
                                     lambda: MovementTracker(640, 480, label=f"{cam_id}#{tid}"))
 
@@ -3812,13 +3166,7 @@ def process_camera_thread(cam_id):
             # of this block, once track_status is final. They used to be drawn
             # here in a fixed green and then partly repainted, which is why the
             # skeleton stayed cyan/yellow no matter what the box said.
-            # Enough points AND those points describe a body. An implausible
-            # skeleton leaves has_kpts False, so update() returns before any
-            # fall path runs and the candidate resets to NORMAL — a ghost on
-            # furniture can still be tracked, but it cannot raise an emergency
-            # or open an incident clip.
-            has_kpts  = (pose_has_required_keypoints(kpts)
-                         and pose_is_plausible(kpts))
+            has_kpts  = pose_has_required_keypoints(kpts)
             angle     = get_torso_angle(kpts) if has_kpts else 0.0
             aspect    = get_body_aspect_ratio((x1, y1, x2, y2))
             # Movement signal uses BBOX centroid, not torso keypoints.
@@ -3831,16 +3179,10 @@ def process_camera_thread(cam_id):
             # exactly as before — only the movement input changes here.
             center_px = ((x1 + x2) / 2, (y1 + y2) / 2)
 
-            # Size-based weights, computed once here so the diagnostic labels
-            # below shrink with distance too — they were fixed at 0.45-0.5 and
-            # were most of the clutter in a crowded frame. The box is
-            # re-weighted after track_status is known, to add the severity bump.
-            _dbg_font = overlay_weights(y2 - y1, display.shape[0])[3]
-
             # ── Module C: Fall ────────────────────────────────────────────
             posture = get_posture_ratios(kpts) if POSTURE_RATIO_ON else (None, None)
 
-            if POSTURE_RATIO_ON and OVERLAY_DEBUG_TEXT:
+            if POSTURE_RATIO_ON:
                 _ev, _cp = posture
                 _txt = (f"e={_ev:.2f}" if _ev is not None else "e=--") + \
                        (f" c={_cp:.2f}" if _cp is not None else " c=--")
@@ -3848,36 +3190,26 @@ def process_camera_thread(cam_id):
                 # where Path C starts firing is visible without reading logs.
                 _hot = ((_ev is not None and _ev < POSTURE_ELEVATION_MAX) or
                         (_cp is not None and _cp < POSTURE_COMPACT_MAX))
-                cv2.putText(display, _txt, (x1, y2 + 28),
-                            cv2.FONT_HERSHEY_SIMPLEX, _dbg_font,
+                cv2.putText(display, _txt, (x1, y2 + 34),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                             (0, 165, 255) if _hot else (200, 200, 60), 1)
             _seated, _seated_deep = (looks_seated(kpts, angle) if has_kpts
                                      else (False, False))
-            if _seated and OVERLAY_DEBUG_TEXT:
+            if _seated:
                 _kl, _kr = knee_flexion(kpts)
                 _kt = ((f"L{_kl:.0f}" if _kl is not None else "L--") + "/" +
                        (f"R{_kr:.0f}" if _kr is not None else "R--"))
                 cv2.putText(display, f"seated {_kt}", (x1, y1 - 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, _dbg_font,
-                            (120, 200, 255), 1)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (120, 200, 255), 1)
             # Which furniture, if any, is holding this person up. Hip midpoint
             # is the test point — that is what a seat actually supports.
             _support = support_point(kpts if has_kpts else None, (x1, y1, x2, y2))
             _furniture = furniture_zone_at(cam_id, _support)
-            if _furniture and OVERLAY_DEBUG_TEXT:
+            if _furniture:
                 cv2.circle(display, (int(_support[0]), int(_support[1])),
-                           3, (160, 160, 255), -1)
-                cv2.putText(display, f"on {_furniture}", (x1, y2 + 42),
-                            cv2.FONT_HERSHEY_SIMPLEX, _dbg_font,
-                            (160, 160, 255), 1)
-
-            # Bent over but still on their feet — see standing_bend(). Gates
-            # Path A only, so a genuine fall is unaffected.
-            _bend = standing_bend(kpts) if has_kpts else False
-            if _bend and angle > FALL_ANGLE_THRESHOLD and OVERLAY_DEBUG_TEXT:
-                cv2.putText(display, "BENDING (on feet)", (x1, y1 - 24),
-                            cv2.FONT_HERSHEY_SIMPLEX, _dbg_font,
-                            (120, 220, 120), 1)
+                           5, (160, 160, 255), -1)
+                cv2.putText(display, f"on {_furniture}", (x1, y2 + 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 255), 1)
 
             fall_status, fall_alert = fall_sm.update(angle, aspect, has_kpts, now,
                                                      bbox_h=(y2 - y1), posture=posture,
@@ -3887,8 +3219,7 @@ def process_camera_thread(cam_id):
                                                      center_y=(y1 + y2) / 2.0,
                                                      extent_ratio=body_extent_ratio(
                                                          kpts if has_kpts else None,
-                                                         y2 - y1),
-                                                     bend=_bend)
+                                                         y2 - y1))
             if fall_sm.is_fallen():
                 note_fallen(cam_id, tid, now)
             # Remember where they were, so the persistence path can judge
@@ -3909,10 +3240,17 @@ def process_camera_thread(cam_id):
                     send_alert(cam_id, "WARNING",   f"[ID {tid}] {fall_alert}", detection="lying_down",
                                track_id=tid, box=(x1, y1, x2, y2))
 
-                # Clear inactivity state for this track, so the timer does not
-                # fire on someone the system already knows has fallen. It will
-                # accumulate fresh state only if the person recovers and stays
-                # in frame long enough.
+                # Clear pacing + inactivity state for this track. The pacing
+                # detector's 60-second deque still contains positions from
+                # BEFORE the fall (walking up to it, the fall trajectory
+                # itself), and those positions can spuriously trigger a
+                # "PACING DETECTED" alert moments after the person is
+                # already on the floor — which is exactly the false positive
+                # we want to prevent. Resetting also keeps the inactivity
+                # timer from firing on someone the system already knows has
+                # fallen. Both detectors will accumulate fresh state only if
+                # the person recovers and stays in frame long enough.
+                pacing_det.reset()
                 movement_tr.reset()
 
             track_status = "NORMAL"
@@ -3935,15 +3273,15 @@ def process_camera_thread(cam_id):
 
                 # Visual debug overlay — wrist circles + score readout when
                 # the scorer is registering anything meaningful.
-                if has_kpts and body_agi_score > 0.1 and OVERLAY_DEBUG_TEXT:
+                if has_kpts and body_agi_score > 0.1:
                     for wr_i in [9, 10]:
                         if float(kpts[wr_i][2]) >= 0.35:
                             wx, wy = int(kpts[wr_i][0]), int(kpts[wr_i][1])
                             wcolor = (0, 80, 255) if body_agi_score > AGITATION_THRESHOLD else (180, 80, 255)
-                            cv2.circle(display, (wx, wy), 7, wcolor, 1)
+                            cv2.circle(display, (wx, wy), 10, wcolor, 3)
                     cv2.putText(display, f"Body agi: {body_agi_score:.2f}",
-                                (x1, y1 - 40), cv2.FONT_HERSHEY_SIMPLEX,
-                                _dbg_font, (180, 80, 255), 1)
+                                (x1, y1 - 50), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.45, (180, 80, 255), 1)
 
                 # ── Explicit HAIR-GRAB indicator ─────────────────────────
                 # Surfaces the specific hair-grab signature (both hands on
@@ -3978,6 +3316,51 @@ def process_camera_thread(cam_id):
                 else:
                     last_behavior_per.pop(tid, None)
 
+                # ── Module F: Pacing ─────────────────────────────────────
+                # Independent of agitation — pacing is a longer-window
+                # behavioral signal (60s window, 5min cooldown). Runs on
+                # bbox centroid, not keypoints, so it works even when
+                # YOLO loses track of individual joints.
+                #
+                # Gate 1 — full-body visibility: pacing requires a walking
+                # full body. When only a head is visible (lying down, close-up,
+                # partial occlusion), has_kpts=False and the bbox is very
+                # unstable — it can jump 30-50 px per frame with no real
+                # movement, instantly filling the deque with fake reversals.
+                #
+                # Gate 2 — stationary: a person sitting still cannot be pacing.
+                # Without this, bbox centroid jitter over 60 s accumulates
+                # apparent "reversals" and the efficiency metric hits near-0
+                # (no net displacement while sitting) — both conditions that
+                # would spuriously pass the pacing thresholds.
+                # is_stationary() reads existing movement_tr history so the
+                # check is valid before movement_tr.update() for this frame.
+                #
+                # Gate 0 — PACING_MODULE=0 switches the module off entirely.
+                # Placed first so no deque is filled and no score is computed
+                # when it is disabled.
+                if PACING_ON and has_kpts and not movement_tr.is_stationary(now):
+                    pacing_score, pacing_alert = pacing_det.update(center_px, now)
+
+                    if pacing_alert:
+                        send_alert(cam_id, "WARNING", f"[ID {tid}] {pacing_alert}", detection="pacing",
+                                   track_id=tid)
+                        last_pacing_per[tid] = pacing_alert
+                        if _priority(pacing_alert) > _priority(track_status):
+                            track_status = pacing_alert
+                    else:
+                        last_pacing_per.pop(tid, None)
+                else:
+                    pacing_score = 0.0
+                    last_pacing_per.pop(tid, None)
+
+                # HUD readout when pacing score is climbing — shows nurses
+                # that this track is "building toward" a pacing alert
+                # rather than firing it out of nowhere.
+                if pacing_score > 0.25:
+                    cv2.putText(display, f"Pacing: {pacing_score:.2f}",
+                                (x1, y1 - 70), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.45, (200, 100, 0), 1)
 
                 # ── Module E: Movement / Inactivity ──────────────────────
                 # Uses bbox centroid (not keypoints) — runs on every tracked
@@ -4046,29 +3429,16 @@ def process_camera_thread(cam_id):
             # are always consistent with each other and with the HUD band.
             t_prio  = _priority(track_status)
             t_color = status_color(track_status)
-            # Weights follow apparent size so a distant person is a hairline
-            # rather than a blob; the box still gains thickness with severity.
-            t_thick, t_bone, t_joint, t_font = overlay_weights(
-                y2 - y1, display.shape[0], t_prio)
+            # Thickness carries severity for anyone who cannot rely on colour:
+            # 2 = normal, 3 = warning, 5 = emergency.
+            t_thick = 5 if t_prio >= 7 else (3 if t_prio >= 4 else 2)
             cv2.rectangle(display, (x1, y1), (x2, y2), t_color, t_thick)
-            cv2.putText(display, f"ID {tid}", (x1, y2 + 14),
-                        cv2.FONT_HERSHEY_SIMPLEX, t_font, t_color, 1)
-            draw_pose_overlay(display, kpts, color=t_color,
-                              bone_t=t_bone, joint_r=t_joint)
+            cv2.putText(display, f"ID {tid}", (x1, y2 + 18),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, t_color, 1)
+            draw_pose_overlay(display, kpts, color=t_color)
             if t_prio >= 2:
-                cv2.putText(display, track_status, (x1, y1 - 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, t_font * 1.15, t_color,
-                            max(1, t_bone))
-
-            # Same facts the overlay above was drawn from, recorded so the clip
-            # worker can redraw this ONE track later. kpts is copied because
-            # the EMA smoother keeps mutating its per-track array.
-            frame_records.append({
-                "tid":    tid,
-                "box":    (x1, y1, x2, y2),
-                "kpts":   kpts.copy(),
-                "status": track_status,
-            })
+                cv2.putText(display, track_status, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, t_color, 2)
 
             # Update camera-level worst status
             if t_prio > _priority(worst_status):
@@ -4137,9 +3507,11 @@ def process_camera_thread(cam_id):
         for tid in stale:
             fall_machines.pop(tid, None)
             body_agi_scorers.pop(tid, None)
+            pacing_detectors.pop(tid, None)
             movement_trackers.pop(tid, None)
             last_seen.pop(tid, None)
             last_behavior_per.pop(tid, None)
+            last_pacing_per.pop(tid, None)
             last_movement_per.pop(tid, None)
             kpt_smooth.pop(tid, None)
 
@@ -4150,23 +3522,18 @@ def process_camera_thread(cam_id):
         draw_status_bar(display, cam_id,
                         f"{n_people} person(s) | WORST: {worst_status}",
                         status_color(worst_status),
-                        clock=clock_str())
+                        clock=time.strftime("%H:%M:%S"))
 
         with lock:
             if cam_frames[cam_id] is None:
                 print(f"[STREAM {cam_id}] ✅ First frame ready — browser feed is now live.")
-            # The browser gets the fully annotated frame: an operator watching
-            # live needs to see everyone in the room.
             cam_frames[cam_id] = display.copy()
-            # The clip worker gets the clean frame plus what was in it, and
-            # paints only the incident's subject at write time.
-            cam_clean[cam_id] = (frame, tuple(frame_records))
 
         # Throttled push into the pre-roll buffer for alert clip recording.
-        # Clean frame + records, NOT the annotated `display`: the pre-roll is
-        # captured before the incident is classified, so at this point we do
-        # not yet know which person the clip will end up being about.
-        _maybe_buffer_frame(cam_id, frame, tuple(frame_records))
+        # Uses the same annotated `display` frame the dashboard sees so clip
+        # playback shows the bbox / pose / status overlays that triggered
+        # the alert — much more useful for review than a clean feed.
+        _maybe_buffer_frame(cam_id, display)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Flask — MJPEG Stream Routes
@@ -4268,162 +3635,6 @@ def _verify_signed_stream_token(token: str) -> bool:
     return True
 
 
-def _is_safe_clip_filename(filename: str) -> bool:
-    """Mirror of isSafeClipFilename in backend/utils/clipToken.js.
-
-    Applied BEFORE the HMAC check and again before touching the filesystem. The
-    token proves the backend authorised *some* name; it does not prove the name
-    is harmless, because a caller controls the path segment the token is
-    verified against.
-    """
-    return bool(filename) and not any(
-        bad in filename for bad in ("/", "\\", "..", "\0")
-    )
-
-
-def _verify_clip_token(token: str, filename: str, action: str = "play") -> bool:
-    """Verify a backend-minted, resource-bound clip token.
-
-    Token format:
-        play:    v1.<exp>.<hmacSha256Hex("v1.<exp>.<filename>", secret)>
-        delete:  v1d.<exp>.<hmacSha256Hex("v1d.<exp>.<filename>", secret)>
-
-    Mirrors backend/utils/clipToken.js. Shared secret = CLIP_SIGNING_SECRET.
-
-    TWO PROPERTIES MATTER HERE, and both come from what is hashed rather than
-    from what is checked afterwards:
-
-    1. RESOURCE BINDING. The filename is hashed into the signature but not
-       carried inside the token, so a token minted for one clip cannot be
-       replayed against another -- change the filename and the expected HMAC
-       changes with it.
-
-    2. ACTION BINDING. The version prefix is part of the signed message, so a
-       playback token ("v1.") can never satisfy a delete ("v1d.") check. Every
-       played clip hands a valid token to the viewer's browser, where it sits
-       in history, logs and the network tab. If that same token could delete,
-       watching a fall would be enough to destroy the recording of it.
-    """
-    import hmac, hashlib, time as _time
-    secret = os.getenv("CLIP_SIGNING_SECRET", "")
-    if not secret or not token or not _is_safe_clip_filename(filename):
-        return False
-    expected_version = "v1d" if action == "delete" else "v1"
-    parts = token.split(".")
-    if len(parts) != 3:
-        return False
-    version, exp, sig = parts
-    if version != expected_version:
-        return False
-    message = f"{version}.{exp}.{filename}"
-    expected = hmac.new(
-        secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-    if not hmac.compare_digest(sig, expected):
-        return False
-    try:
-        if int(exp) < int(_time.time()):
-            return False
-    except ValueError:
-        return False
-    return True
-
-
-@app.route("/clips/<filename>")
-def serve_clip(filename):
-    """Serve one recorded incident clip out of CLIP_DIR.
-
-    WHY THIS LIVES HERE AND NOT IN THE BACKEND: the clips are on this machine's
-    disk (CLIP_DIR, e.g. /opt/visiosphere/clips). The Express backend runs on
-    Render and has no access to this filesystem, so it cannot serve the bytes.
-    It does the part it *can* do — check that the requesting user's facility
-    owns the incident — and mints a short-lived token pointing here. This route
-    is the other half of that handshake and does no facility logic of its own:
-    holding a valid token IS the authorisation, exactly as with /video_feed.
-
-    Flask's <filename> converter already refuses to match a path containing
-    "/", but the checks below are kept explicit rather than relying on that.
-    """
-    from flask import request, abort, send_from_directory
-
-    if not os.getenv("CLIP_SIGNING_SECRET", ""):
-        # Fail closed. An unconfigured secret must not mean "serve to anyone" —
-        # this endpoint hands out CCTV footage of residents.
-        print("[CLIP] refused: CLIP_SIGNING_SECRET is not set")
-        abort(503)
-
-    lowered = filename.lower()
-    if not _is_safe_clip_filename(filename) or not lowered.endswith((".mp4", ".jpg")):
-        abort(400)
-
-    if not _verify_clip_token(request.args.get("token", ""), filename):
-        abort(403)
-
-    # Resolve and confirm the file really sits directly inside CLIP_DIR — a
-    # symlink planted in the clips folder should not be able to escape it.
-    base = CLIP_DIR.resolve()
-    target = (base / filename).resolve()
-    if target.parent != base or not target.is_file():
-        abort(404)
-
-    # conditional=True enables HTTP Range responses, which is what lets the
-    # browser seek within the clip instead of re-downloading from byte 0.
-    return send_from_directory(
-        base, filename,
-        mimetype="image/jpeg" if lowered.endswith(".jpg") else "video/mp4",
-        conditional=True,
-    )
-
-
-@app.route("/clips/<filename>", methods=["DELETE"])
-def delete_clip(filename):
-    """Delete one clip and its poster.
-
-    Requires a DELETE-scoped token (see _verify_clip_token): the backend mints
-    these only for an authenticated Facility Admin whose facility owns the
-    incident, and only for that one filename. A playback token will not work
-    here, which is the point -- see the action-binding note in that function.
-
-    The poster is removed alongside the clip. Leaving orphaned thumbnails of a
-    recording someone deliberately deleted would defeat the deletion.
-    """
-    from flask import request, abort, jsonify
-
-    if not os.getenv("CLIP_SIGNING_SECRET", ""):
-        print("[CLIP] delete refused: CLIP_SIGNING_SECRET is not set")
-        abort(503)
-
-    if not _is_safe_clip_filename(filename) or not filename.lower().endswith(".mp4"):
-        abort(400)
-
-    if not _verify_clip_token(request.args.get("token", ""), filename, action="delete"):
-        abort(403)
-
-    base = CLIP_DIR.resolve()
-    target = (base / filename).resolve()
-    if target.parent != base:
-        abort(400)
-
-    removed = []
-    for path in (target, poster_path_for(target)):
-        try:
-            if path.is_file():
-                path.unlink()
-                removed.append(path.name)
-        except OSError as err:
-            print(f"[CLIP] delete failed for {path.name}: {err}")
-            abort(500)
-
-    if not removed:
-        # Already gone. Report success rather than 404: the caller asked for the
-        # file to not exist, and it does not exist. A 404 here would strand the
-        # backend, which still needs to clear clipPath on the incident.
-        print(f"[CLIP] delete: {filename} was already absent")
-
-    print(f"[CLIP] deleted {removed or '(nothing, already absent)'}")
-    return jsonify({"deleted": removed})
-
-
 @app.route("/video_feed/<cam_id>")
 def video_feed(cam_id):
     # Two-tier auth, both optional and independent:
@@ -4454,18 +3665,6 @@ def video_feed(cam_id):
 # Generous enough to ride out a brief RTSP hiccup (capture_thread retries once
 # per second), tight enough that an unplugged camera goes Inactive quickly.
 CAMERA_STALE_AFTER_S = float(os.getenv("CAMERA_STALE_AFTER_S", "5.0"))
-
-# ── Low-light gate ───────────────────────────────────────────────────────────
-# Keyed on BRIGHTNESS, never on the clock. Night falls are the ones that matter
-# most, so refusing to watch after a certain hour would be indefensible. But a
-# frame too dark to see is one where the detector's output is noise, and acting
-# on noise is worse than not acting — it buries the real alerts.
-# NIGHT_GATE_LUMA is mean pixel value 0-255; 18 is very dark, roughly "lights
-# out with no IR". NIGHT_GATE_HYST stops it flapping at the boundary.
-# Set NIGHT_GATE=0 to disable.
-NIGHT_GATE_ON   = os.getenv("NIGHT_GATE", "1") == "1"
-NIGHT_GATE_LUMA = float(os.getenv("NIGHT_GATE_LUMA", "18"))
-NIGHT_GATE_HYST = float(os.getenv("NIGHT_GATE_HYST", "4"))
 
 
 def camera_health():
@@ -4534,7 +3733,7 @@ if __name__ == "__main__":
         from urllib.parse import quote
         print(f"[READY]  Video feed: http://localhost:5001/video_feed/{quote(cam_id)}  ({cam_id} ← {source})")
     print(f"[READY]  Status:     http://localhost:5001/status")
-    print(f"[READY]  Modules: C (Fall)  D (Body Agitation TEST_MODE={BEHAVIOR_TEST_MODE})  E (Movement TEST_MODE={MOVEMENT_TEST_MODE})")
+    print(f"[READY]  Modules: C (Fall)  D (Body Agitation TEST_MODE={BEHAVIOR_TEST_MODE})  E (Movement TEST_MODE={MOVEMENT_TEST_MODE})  F (Pacing)")
     print(f"[READY]  Multi-person: ByteTrack track IDs, per-track state machines\n")
 
     app.run(host="0.0.0.0", port=5001, debug=False, threaded=True, use_reloader=False)

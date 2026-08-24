@@ -29,7 +29,6 @@ Alert types in alert_log.json map to ground-truth types as follows:
     WARNING    + "LYING DOWN"      → lying_down
     WARNING    + "INACTIVE"        → inactivity
     WARNING    + "AGITATION"       → agitation
-    WARNING    + "PACING"          → pacing
 """
 
 import argparse
@@ -43,7 +42,6 @@ ALERT_TYPE_MAP = [
     ("LYING DOWN",     "lying_down"),
     ("INACTIVE",       "inactivity"),
     ("AGITATION",      "agitation"),
-    ("PACING",         "pacing"),
 ]
 
 def classify_alert(alert):
