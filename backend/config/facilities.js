@@ -181,9 +181,42 @@ const idPrefixFor = (facilityKey, role) => FACILITIES[facilityKey]?.idPrefixes?.
 /** Back-compat alias. */
 const adminPrefixFor = (facilityKey) => idPrefixFor(facilityKey, 'admin');
 
+/**
+ * Loose key for camera-name matching: lowercased, with spaces, underscores and
+ * hyphens all collapsed to nothing.
+ *
+ * WHY: the camera name is the ONLY tenant signal on the ai_core -> backend
+ * alert path, and it arrives as a free-text string typed into ai_core/.env
+ * (CAM_<n>_ID) on a machine nobody edits often. An exact-match lookup has
+ * already misrouted a facility's alerts twice here: once from "Living room"
+ * (lowercase r) and once from an underscore/space mismatch. Both times the
+ * unregistered name fell through to DEFAULT_FACILITY and Saint Anthony's
+ * incidents landed in Grace's dashboard.
+ *
+ * Normalising the lookup does not make the fallback safe — it makes it rare.
+ * A genuine typo still needs the warning below.
+ */
+const cameraKey = (name) =>
+  String(name == null ? '' : name).toLowerCase().replace(/[\s_-]+/g, '');
+
+const CAMERA_FACILITY_NORMALIZED = Object.fromEntries(
+  Object.entries(CAMERA_FACILITY).map(([name, facility]) => [cameraKey(name), facility])
+);
+
 const facilityForCamera = (cameraId) => {
-  const match = CAMERA_FACILITY[cameraId];
-  if (match) return match;
+  const exact = CAMERA_FACILITY[cameraId];
+  if (exact) return exact;
+
+  const loose = CAMERA_FACILITY_NORMALIZED[cameraKey(cameraId)];
+  if (loose) {
+    console.warn(
+      `[facility] Camera "${cameraId}" matched "${loose}" only after ` +
+      `normalisation — the name in ai_core/.env (CAM_<n>_ID) does not exactly ` +
+      `match the CAMERA_FACILITY key in config/facilities.js. Align them.`
+    );
+    return loose;
+  }
+
   console.warn(
     `[facility] Camera "${cameraId}" is not registered in CAMERA_FACILITY; ` +
     `defaulting its incidents to ${DEFAULT_FACILITY}. Add it to config/facilities.js.`
@@ -196,8 +229,17 @@ const housesFor = (facilityKey) => FACILITIES[facilityKey]?.houses || [];
 const facilityForHouse = (house) =>
   FACILITY_KEYS.find((k) => FACILITIES[k].houses.includes(house)) || null;
 
+/**
+ * Socket.IO room name for a facility. Defined HERE rather than in
+ * config/socket.js so that any module needing to emit into a facility's
+ * room (e.g. incidentController's resolve broadcast) can reach it without
+ * importing the socket initialiser and creating a require cycle.
+ */
+const roomFor = (facility) => `facility:${facility}`;
+
 module.exports = {
   FACILITIES,
+  roomFor,
   FACILITY_KEYS,
   DEFAULT_FACILITY,
   CAMERA_FACILITY,

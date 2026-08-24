@@ -1,7 +1,9 @@
   const incidentService = require('../services/incidentService');
+const videoService = require('../services/videoService');
   const { dispatchResolutionPushToStaff } = require('../services/notificationService');
   const Admin = require('../models/Admin');
   const Nurse = require('../models/Nurse');
+const { roomFor } = require('../config/facilities');
 
   async function getIncidents(req, res, next) {
     try {
@@ -77,7 +79,13 @@
 
       const io = req.app.get('io');
       if (io) {
-        io.emit('incident_resolved', {
+        // BUGFIX (pre-existing): this was a bare io.emit, which broadcasts to
+      // EVERY connected dashboard regardless of facility — so Grace's staff
+      // saw Saint Anthony's incidents being resolved, and vice versa. Scoped
+      // to the incident's own facility room, matching config/socket.js.
+      // incident.facility is stamped by the facilityScope plugin on create, so
+      // it is authoritative here (more so than re-deriving it from location).
+      io.to(roomFor(incident.facility)).emit('incident_resolved', {
           _id:          incident._id,
           resolvedBy:   incident.resolvedBy,
           resolverName,
@@ -93,6 +101,37 @@
     }
   }
 
+  /**
+   * GET /api/incidents/:id/video-url
+   *
+   * Returns a short-lived signed URL for this incident's clip, or 404 if no
+   * clip exists yet. The bytes are served by ai_core on the mini PC, not by
+   * this process — see services/videoService.js for why.
+   *
+   * FACILITY SAFETY: getIncidentById runs through Incident.findById, which the
+   * facilityScope plugin scopes to req.user's facility. A caller asking for an
+   * incident belonging to the other facility gets null here and falls into the
+   * 404 below — it never reaches videoService, so no token is ever minted for
+   * a clip the caller may not see.
+   */
+  async function getVideoUrl(req, res, next) {
+    try {
+      const incident = await incidentService.getIncidentById(req.params.id);
+      if (!incident) {
+        const err = new Error('Incident not found');
+        err.status = 404;
+        throw err;
+      }
+      const result = await videoService.getSignedClipUrl(incident);
+      if (!result) {
+        return res.status(404).json({ message: 'No clip available for this incident yet' });
+      }
+      res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   module.exports = {
     getIncidents,
     getUnreadCount,
@@ -100,5 +139,6 @@
     getWeeklyStats,
     acknowledgeIncident,
     dismissIncident,
-    resolveIncident
+    resolveIncident,
+    getVideoUrl
   };

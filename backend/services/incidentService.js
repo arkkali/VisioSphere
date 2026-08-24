@@ -35,6 +35,23 @@ async function getIncidents(query) {
   return { total, items };
 }
 
+/**
+ * Load one incident by id.
+ *
+ * FACILITY SAFETY: this looks unscoped but is not. Mongoose routes findById
+ * through findOne, which models/plugins/facilityScope.js intercepts with a
+ * pre('findOne') hook and rewrites to include the caller's facility. Routes
+ * reach here behind verifyToken, which runs next() inside runWithFacility, so
+ * the context is always present. An admin from one facility passing the other
+ * facility's _id gets null -> 404, never the document. Do NOT "fix" this by
+ * adding .setOptions({ skipFacilityScope: true }) or by calling it from an
+ * unscoped context.
+ */
+async function getIncidentById(id) {
+  validateObjectId(id);
+  return Incident.findById(id).lean();
+}
+
 async function getUnreadCount(since) {
   const sinceDate = since
     ? new Date(since)
@@ -171,6 +188,16 @@ async function getWeeklyStats(query) {
   return result;
 }
 
+/**
+ * These *By fields are `ref: 'User'` ObjectIds, but callers pass whatever is in
+ * req.body.userId — sometimes a business id like "STA-202601", which would
+ * throw a CastError and turn a successful resolve into a 500. Store it only
+ * when it really is an ObjectId; otherwise keep the previous behaviour (null).
+ */
+function toObjectIdOrNull(value) {
+  return mongoose.Types.ObjectId.isValid(value) ? value : null;
+}
+
 function validateObjectId(id) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     const err = new Error('Invalid Incident ID format');
@@ -183,7 +210,7 @@ async function acknowledgeIncident(id, userId) {
   validateObjectId(id);
   const incident = await Incident.findByIdAndUpdate(
     id,
-    { acknowledged: true, acknowledgedBy: null, acknowledgedAt: new Date() },
+    { acknowledged: true, acknowledgedBy: toObjectIdOrNull(userId), acknowledgedAt: new Date() },
     { returnDocument: 'after' }
   );
   if (!incident) {
@@ -198,7 +225,7 @@ async function dismissIncident(id, userId) {
   validateObjectId(id);
   const incident = await Incident.findByIdAndUpdate(
     id,
-    { dismissed: true, dismissedBy: null, dismissedAt: new Date() },
+    { dismissed: true, dismissedBy: toObjectIdOrNull(userId), dismissedAt: new Date() },
     { returnDocument: 'after' }
   );
   if (!incident) {
@@ -209,11 +236,23 @@ async function dismissIncident(id, userId) {
   return incident;
 }
 
-async function resolveIncident(id, falsePositive) {
+/**
+ * BUGFIX (pre-existing): the signature used to be (id, falsePositive) while
+ * incidentController has always called it as (id, userId, falsePositive). The
+ * userId string landed in the falsePositive slot, so EVERY resolved incident
+ * was written with falsePositive: true — silently corrupting the false-positive
+ * rate in reports. Signature now matches the caller.
+ */
+async function resolveIncident(id, userId, falsePositive) {
   validateObjectId(id);
   const incident = await Incident.findByIdAndUpdate(
     id,
-    { isResolved: true, resolvedBy: null, resolvedAt: new Date(), falsePositive: !!falsePositive },
+    {
+      isResolved: true,
+      resolvedBy: toObjectIdOrNull(userId),
+      resolvedAt: new Date(),
+      falsePositive: !!falsePositive,
+    },
     { returnDocument: 'after' }
   );
   if (!incident) {
@@ -226,6 +265,7 @@ async function resolveIncident(id, falsePositive) {
 
 module.exports = {
   getIncidents,
+  getIncidentById,
   getUnreadCount,
   getDailyStats,
   getWeeklyStats,

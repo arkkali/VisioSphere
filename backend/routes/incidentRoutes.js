@@ -8,6 +8,7 @@ router.get('/',                    verifyToken, readLimiter,  incidentController
 router.get('/unread-count',        verifyToken, readLimiter,  incidentController.getUnreadCount);
 router.get('/stats/daily',         verifyToken, readLimiter,  incidentController.getDailyStats);
 router.get('/stats/weekly',        verifyToken, readLimiter,  incidentController.getWeeklyStats);
+router.get('/:id/video-url',       verifyToken, readLimiter,  incidentController.getVideoUrl);
 router.patch('/:id/acknowledge',   verifyToken, writeLimiter, incidentController.acknowledgeIncident);
 router.patch('/:id/dismiss',       verifyToken, writeLimiter, incidentController.dismissIncident);
 router.patch('/:id/resolve',       verifyToken, writeLimiter, incidentController.resolveIncident);

@@ -2,11 +2,8 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const Incident = require('../models/Incident');
 const { dispatchIncidentPushToStaff } = require('../services/notificationService');
-const { facilityForCamera } = require('./facilities');
+const { facilityForCamera, roomFor } = require('./facilities');
 const { runWithFacility } = require('../models/plugins/facilityScope');
-
-/** Socket.IO room a dashboard client joins, so alerts stay within a facility. */
-const roomFor = (facility) => `facility:${facility}`;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
