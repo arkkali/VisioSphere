@@ -38,7 +38,7 @@ const ClipPlayer = ({ clip, onClose }) => {
   const [resolvedUrl, setResolvedUrl] = useState(null);
   const [urlError, setUrlError] = useState(null);
   const [duration, setDuration] = useState(null);
-  // null = fine. Otherwise a reason string: 'decode' | 'network' | 'http:<status>'.
+  // null = playing fine. Otherwise { reason, code, detail } from handleError.
   const [playbackFailure, setPlaybackFailure] = useState(null);
 
   useEffect(() => {
@@ -88,42 +88,54 @@ const ClipPlayer = ({ clip, onClose }) => {
     }
   };
 
-  // <video onError> fires for BOTH transport failures (expired token -> 403,
-  // missing file -> 404, tunnel down) and decode failures (the file arrived
-  // intact but the browser has no decoder for it). The element cannot tell
-  // them apart -- error.code is MEDIA_ERR_SRC_NOT_SUPPORTED for both -- and
-  // guessing sends people debugging the wrong layer. So re-request one byte
-  // and let the status code say which it was.
+  // Diagnosing a playback failure WITHOUT a network call.
+  //
+  // The previous version re-requested one byte with a Range header to see
+  // whether the server or the codec was at fault. That was a mistake: Range is
+  // NOT a CORS-safelisted request header, so it forces an OPTIONS preflight to
+  // the ai_core origin. Any hiccup in that preflight makes fetch() throw, and
+  // the code then reported "the recorder may be offline" for what was very
+  // possibly a reachable file the browser simply could not decode. A diagnostic
+  // that can misdiagnose more easily than the thing it diagnoses is worse than
+  // none.
+  //
+  // The <video> element already knows which happened, and its MediaError needs
+  // no request, no preflight and no CORS. Chrome also puts a specific reason in
+  // error.message (e.g. DEMUXER_ERROR_CODE_UNSUPPORTED_VIDEO_TYPE), which is
+  // better evidence than anything inferred from outside — so it is shown
+  // verbatim rather than hidden behind a friendly guess.
   const handleError = () => {
-    if (!resolvedUrl) {
-      setPlaybackFailure('network');
-      return;
+    const mediaError = videoRef.current?.error;
+    const code = mediaError?.code ?? 0;
+    const detail = mediaError?.message || '';
+    const upper = detail.toUpperCase();
+
+    // MediaError codes: 1 ABORTED, 2 NETWORK, 3 DECODE, 4 SRC_NOT_SUPPORTED.
+    // Code 4 is ambiguous alone (Chrome uses it for both "no decoder for this
+    // format" and "could not open the source"), so the message breaks the tie.
+    let reason;
+    if (code === 3 || upper.includes('UNSUPPORTED') || upper.includes('DECODE')) {
+      reason = 'decode';
+    } else if (code === 2 || upper.includes('COULD_NOT_OPEN') || upper.includes('NETWORK')) {
+      reason = 'transport';
+    } else {
+      reason = 'unknown';
     }
-    fetch(resolvedUrl, { headers: { Range: 'bytes=0-0' } })
-      .then((res) => {
-        // Server handed the bytes over, so the token, the tunnel and the file
-        // are all fine -- which leaves the codec.
-        setPlaybackFailure(res.ok ? 'decode' : `http:${res.status}`);
-      })
-      .catch(() => setPlaybackFailure('network'));
+
+    console.error('[VideoPlayerModal] playback failed', { code, detail, url: resolvedUrl });
+    setPlaybackFailure({ reason, code, detail });
   };
 
-  const failureMessage = (reason) => {
-    if (reason === 'decode') {
-      return 'The clip downloaded, but this browser cannot decode it. It was ' +
-        'likely recorded as mp4v — run scripts/transcode_clips.py on the mini PC.';
+  const failureMessage = (failure) => {
+    if (failure.reason === 'decode') {
+      return 'The clip downloaded, but this browser cannot decode it — it was ' +
+        'recorded as mp4v. The recorder needs the H.264 transcode step.';
     }
-    if (reason === 'http:403') {
-      return 'Access to this clip was refused. The playback link may have ' +
-        'expired — close and reopen the clip to request a fresh one.';
+    if (failure.reason === 'transport') {
+      return 'The clip could not be fetched from the recorder. The playback ' +
+        'link may have expired, or the recorder is not serving this file.';
     }
-    if (reason === 'http:404') {
-      return 'The recording is no longer on disk.';
-    }
-    if (reason && reason.startsWith('http:')) {
-      return `The clip could not be retrieved (error ${reason.slice(5)}).`;
-    }
-    return 'The clip could not be reached. The camera recorder may be offline.';
+    return 'This clip could not be played.';
   };
 
   return (
@@ -162,9 +174,15 @@ const ClipPlayer = ({ clip, onClose }) => {
         ) : urlError ? (
           <p className="m-0 text-white text-sm font-semibold px-6 text-center">{urlError}</p>
         ) : playbackFailure ? (
-          <p className="m-0 text-white text-sm font-semibold px-6 text-center max-w-[80%]">
-            {failureMessage(playbackFailure)}
-          </p>
+          <div className="px-6 text-center max-w-[85%]">
+            <p className="m-0 text-white text-sm font-semibold">
+              {failureMessage(playbackFailure)}
+            </p>
+            <p className="m-0 mt-2 text-[0.68rem] font-mono text-white/55 break-words">
+              MediaError {playbackFailure.code}
+              {playbackFailure.detail ? ` · ${playbackFailure.detail}` : ''}
+            </p>
+          </div>
         ) : resolvedUrl ? (
           <video
             ref={videoRef}
