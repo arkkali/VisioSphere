@@ -136,7 +136,26 @@ function mapIncidentToClip(incident) {
 export async function fetchVideoClips(options = {}) {
   const { since, limit = 100 } = options;
   const { data } = await axiosInstance.get(`${API_PREFIX}/incidents`, {
-    params: { source: 'cctv', since, limit },
+    params: {
+      source: 'cctv',
+      since,
+      limit,
+      // showDismissed is ESSENTIAL here, not optional. GET /incidents defaults
+      // to hiding dismissed incidents because its primary caller is the alert
+      // inbox on the CCTV Live Hub, where "dismissed" means "I have seen this
+      // notification, stop showing it to me."
+      //
+      // This page is not an inbox. It is the recording archive. Dismissing a
+      // notification must never hide the footage of the event from review --
+      // that is how six clips silently disappeared from this grid the moment
+      // someone pressed "Clear All" on the Live Hub. The recordings were on
+      // disk the whole time, with clipPath intact; only this filter hid them.
+      //
+      // If a reviewer should ever be able to narrow by alert state, that
+      // belongs in the Filters control as an explicit choice, never as a
+      // default inherited from a different page's semantics.
+      showDismissed: 'true',
+    },
   });
 
   // Only incidents with a clip already attached. An incident can exist before
