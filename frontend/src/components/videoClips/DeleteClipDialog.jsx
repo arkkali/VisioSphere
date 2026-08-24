@@ -11,11 +11,17 @@
 //      expecting the events to disappear from the statistics — they will not,
 //      and that is deliberate.
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
   const [deleting, setDeleting] = useState(false);
+  const [progress, setProgress] = useState(null); // { current, total }
   const [error, setError] = useState(null);
+  const abortRef = useRef(null);
+
+  // If the dialog unmounts mid-delete, abort rather than leaving a request
+  // pending against a component that no longer exists.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // Accepts a single clip or an array, so the same dialog serves the row menu
   // and bulk selection. One confirmation path means one place where the
@@ -26,12 +32,20 @@ const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
   const many = list.length > 1;
 
   const handleConfirm = async () => {
+    const controller = new AbortController();
+    abortRef.current = controller;
     setDeleting(true);
+    setProgress(null);
     setError(null);
     try {
-      await onConfirm(list.map((c) => c.id));
+      await onConfirm(list.map((c) => c.id), {
+        signal: controller.signal,
+        onProgress: (current, total) =>
+          setProgress(total > 1 ? { current, total } : null),
+      });
       onClose();
     } catch (err) {
+      if (controller.signal.aborted) return; // user backed out; nothing to report
       console.error('[DeleteClipDialog] delete failed:', err);
       setError(
         err?.message ||
@@ -39,13 +53,25 @@ const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
         'Could not delete. The recorder may be offline — nothing was removed.'
       );
       setDeleting(false);
+      setProgress(null);
     }
+  };
+
+  // Cancel stays live DURING the delete, on purpose. It was disabled while
+  // `deleting` was true, which meant a stalled request — an unreachable
+  // recorder, a cold backend — left the dialog spinning on "Deleting…" with
+  // every control dead and no way out but a page reload. A destructive
+  // operation is exactly the wrong place to trap someone. Aborting cannot
+  // un-delete files already removed, so the wording below says so.
+  const handleCancel = () => {
+    abortRef.current?.abort();
+    onClose();
   };
 
   return (
     <div
       className="fixed inset-0 z-[2100] bg-black/70 flex items-center justify-center p-4"
-      onClick={onClose}
+      onClick={handleCancel}
     >
       <div
         className="bg-white dark:bg-[#00212e] rounded-[20px] shadow-2xl w-full max-w-[440px] overflow-hidden"
@@ -89,6 +115,12 @@ const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
           </div>
         </div>
 
+        {deleting && (
+          <p className="m-0 px-5 pb-1 text-[0.68rem] text-[#9dabb1] dark:text-[#668894] font-medium">
+            Stopping will not restore recordings already deleted.
+          </p>
+        )}
+
         {error && (
           <div className="mx-5 mb-1 bg-[#fff1f2] dark:bg-[#ff4757]/20 border border-[#ff4757]/30 text-[#e11d48] dark:text-[#ff4757] px-3 py-2 rounded-[10px]">
             <p className="m-0 font-semibold text-xs">{error}</p>
@@ -97,11 +129,10 @@ const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
 
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 mt-2 border-t border-[#f1f5f9] dark:border-[#00435c]">
           <button
-            onClick={onClose}
-            disabled={deleting}
-            className="py-[9px] px-[16px] rounded-[12px] border border-[#e2e8f0] dark:border-[#00435c] bg-white dark:bg-[#00212e] text-[0.78rem] font-bold text-[#5a6265] dark:text-[#a6aeb2] hover:border-[#00a8e8]/50 transition-colors disabled:opacity-50"
+            onClick={handleCancel}
+            className="py-[9px] px-[16px] rounded-[12px] border border-[#e2e8f0] dark:border-[#00435c] bg-white dark:bg-[#00212e] text-[0.78rem] font-bold text-[#5a6265] dark:text-[#a6aeb2] hover:border-[#00a8e8]/50 transition-colors"
           >
-            Cancel
+            {deleting ? 'Stop' : 'Cancel'}
           </button>
           <button
             onClick={handleConfirm}
@@ -109,7 +140,7 @@ const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
             className="py-[9px] px-[18px] rounded-[12px] bg-[#e11d48] text-white text-[0.78rem] font-bold hover:bg-[#be123c] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {deleting
-              ? 'Deleting…'
+              ? (progress ? `Deleting ${progress.current} of ${progress.total}…` : 'Deleting…')
               : many ? `Delete ${list.length} Recordings` : 'Delete Recording'}
           </button>
         </div>

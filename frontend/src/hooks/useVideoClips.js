@@ -273,15 +273,20 @@ export function useVideoClips() {
    * retry is one click and nothing silently vanishes from the UI while its
    * file is still on disk.
    */
-  const removeClips = useCallback(async (clipIds) => {
+  const removeClips = useCallback(async (clipIds, { signal, onProgress } = {}) => {
     const deleted = [];
     const failed = [];
 
     for (const id of clipIds) {
+      // Stop at the first sign the user pulled out. Clips already deleted stay
+      // deleted — the files really are gone — but nothing further is attempted.
+      if (signal?.aborted) break;
       try {
-        await deleteClipRequest(id);
+        onProgress?.(deleted.length + failed.length + 1, clipIds.length);
+        await deleteClipRequest(id, { signal });
         deleted.push(id);
       } catch (err) {
+        if (signal?.aborted) break;
         console.error('[useVideoClips] delete failed for', id, err);
         failed.push(id);
       }

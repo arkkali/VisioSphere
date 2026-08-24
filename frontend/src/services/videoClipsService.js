@@ -260,9 +260,19 @@ export async function updateClip(incidentId, changes) {
  * let anyone quietly lower the facility's fall count by deleting the evidence.
  * Backend restricts this to a Facility Admin and writes an audit entry.
  */
-export async function deleteClip(incidentId) {
+export async function deleteClip(incidentId, { signal } = {}) {
   const { data } = await axiosInstance.delete(
-    `${API_PREFIX}/incidents/${incidentId}/clip`
+    `${API_PREFIX}/incidents/${incidentId}/clip`,
+    {
+      // axios defaults to NO timeout. That is wrong for this call: the backend
+      // has to reach the mini PC over the tunnel to remove the file, so a
+      // stalled recorder or a cold Render dyno would otherwise leave the
+      // request pending forever — and the UI waiting on it with no way out.
+      // 45s is longer than the backend's own 15s abort, so a real backend
+      // error still surfaces as itself rather than as a client timeout.
+      timeout: 45000,
+      signal,
+    }
   );
   return data;
 }
