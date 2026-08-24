@@ -14,7 +14,15 @@
 // does for the live feed. CLIP_SIGNING_SECRET must be identical in
 // backend/.env (or Render's env) and ai_core/.env on the mini PC.
 //
-// Token format:  v1.<expUnixSeconds>.<hmacSha256Hex("v1.<exp>.<filename>", secret)>
+// Token format:
+//   play:    v1.<exp>.<hmacSha256Hex("v1.<exp>.<filename>", secret)>
+//   delete:  v1d.<exp>.<hmacSha256Hex("v1d.<exp>.<filename>", secret)>
+//
+// The version prefix is part of the SIGNED MESSAGE, not just a label, so a
+// playback token can never satisfy a delete check. This matters because every
+// played clip hands a valid token to the viewer's browser, where it lands in
+// history, proxy logs and the network tab. If that same token could delete,
+// simply watching a fall would be enough to destroy the recording of it.
 //
 // `filename` is NOT embedded in the token string — only hashed into it:
 //   1. Embedding it would break parsing. Filenames contain dots (".mp4") and
@@ -44,6 +52,8 @@ const SECRET = process.env.CLIP_SIGNING_SECRET || '';
 // it repeatedly, short enough that a leaked URL is stale by the time it is
 // pasted anywhere.
 const DEFAULT_TTL = parseInt(process.env.CLIP_TOKEN_TTL_SECONDS || '300', 10);
+
+const VERSION_FOR = { play: 'v1', delete: 'v1d' };
 
 function _sign(message) {
   return crypto.createHmac('sha256', SECRET).update(message).digest('hex');
@@ -75,17 +85,31 @@ function isSafeClipFilename(filename) {
  * @param {number} [ttlSeconds]
  * @returns {{ token: string, expiresIn: number, exp: number }}
  */
-function signClipToken(filename, ttlSeconds = DEFAULT_TTL) {
+function signClipToken(filename, ttlSeconds = DEFAULT_TTL, action = 'play') {
   if (!SECRET) {
     throw new Error('CLIP_SIGNING_SECRET is not configured');
   }
   if (!isSafeClipFilename(filename)) {
     throw new Error(`Refusing to sign an unsafe filename: ${filename}`);
   }
+  const version = VERSION_FOR[action];
+  if (!version) {
+    throw new Error(`Unknown clip token action: ${action}`);
+  }
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
-  const message = `v1.${exp}.${filename}`;
-  const token = `v1.${exp}.${_sign(message)}`;
+  const message = `${version}.${exp}.${filename}`;
+  const token = `${version}.${exp}.${_sign(message)}`;
   return { token, expiresIn: ttlSeconds, exp };
+}
+
+/**
+ * Mint a token authorising DELETION of one clip. Deliberately a separate
+ * function rather than a flag on the caller's side, so that every delete is a
+ * visible, greppable decision at the call site. TTL is short: a delete token
+ * is minted and used within one request, never handed to a browser.
+ */
+function signClipDeleteToken(filename, ttlSeconds = 60) {
+  return signClipToken(filename, ttlSeconds, 'delete');
 }
 
 /**
@@ -93,13 +117,14 @@ function signClipToken(filename, ttlSeconds = DEFAULT_TTL) {
  * completeness and unit tests; in production ai_core does the verifying (see
  * _verify_clip_token in cctv_core.py, which mirrors this byte for byte).
  */
-function verifyClipToken(token, filename) {
+function verifyClipToken(token, filename, action = 'play') {
   if (!SECRET || typeof token !== 'string') return false;
   if (!isSafeClipFilename(filename)) return false;
 
   const parts = token.split('.');
   if (parts.length !== 3) return false;
   const [v, exp, sig] = parts;
+  if (v !== VERSION_FOR[action]) return false;
 
   const message = `${v}.${exp}.${filename}`;
   const expected = _sign(message);
@@ -117,4 +142,9 @@ function verifyClipToken(token, filename) {
   return true;
 }
 
-module.exports = { signClipToken, verifyClipToken, isSafeClipFilename };
+module.exports = {
+  signClipToken,
+  signClipDeleteToken,
+  verifyClipToken,
+  isSafeClipFilename,
+};

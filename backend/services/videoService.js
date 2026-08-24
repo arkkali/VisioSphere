@@ -25,12 +25,22 @@
 // scoped lookup and mint a token for a clip they may not see.
 
 const path = require('path');
-const { signClipToken, isSafeClipFilename } = require('../utils/clipToken');
+const {
+  signClipToken,
+  signClipDeleteToken,
+  isSafeClipFilename,
+} = require('../utils/clipToken');
 
 // Public origin of the mini PC's ai_core, i.e. the Cloudflare Tunnel hostname
 // that already fronts /video_feed and /status. NOT a filesystem path.
 // e.g. CLIP_BASE_URL=https://cctv.visiosphere.live
 const CLIP_BASE_URL = (process.env.CLIP_BASE_URL || '').replace(/\/+$/, '');
+
+// Posters get a longer TTL than clips. A clip token is minted the instant
+// someone clicks play and used immediately; a poster URL sits in an <img> on
+// a grid the user may leave open while doing rounds. Too short a TTL and the
+// thumbnails silently rot into placeholders while the page is still up.
+const POSTER_TTL = parseInt(process.env.CLIP_POSTER_TTL_SECONDS || '1800', 10);
 
 /**
  * Reduce whatever is stored in Incident.clipPath to a bare filename.
@@ -109,4 +119,124 @@ async function getSignedClipUrl(incident) {
   return { url, expiresIn };
 }
 
-module.exports = { getSignedClipUrl, clipFilename };
+
+/** Poster (thumbnail) filename for a clip: same basename, .jpg instead of .mp4. */
+function posterFilename(clipPath) {
+  const clip = clipFilename(clipPath);
+  return clip ? clip.replace(/\.mp4$/i, '.jpg') : null;
+}
+
+function buildUrl(filename, token) {
+  // encodeURIComponent, not encodeURI: cam ids contain spaces ("Living Room"),
+  // so filenames do too. The HMAC was computed over the RAW filename, and Flask
+  // hands the route handler the DECODED value, so both sides hash the same
+  // string and only the wire format is escaped.
+  return (
+    `${CLIP_BASE_URL}/clips/${encodeURIComponent(filename)}` +
+    `?token=${encodeURIComponent(token)}`
+  );
+}
+
+function requireBaseUrl() {
+  if (!CLIP_BASE_URL) {
+    throw new Error(
+      'CLIP_BASE_URL is not configured (expected the ai_core tunnel origin, ' +
+      'e.g. https://cctv.visiosphere.live)'
+    );
+  }
+}
+
+/**
+ * Signed URL for one incident's poster frame.
+ *
+ * Returns null when the incident has no clip. Note it does NOT check that the
+ * .jpg exists on disk -- this process cannot see that filesystem. Clips
+ * recorded before posters existed simply 404 when the <img> loads, and the card
+ * falls back to its gradient. That is the right failure: a missing thumbnail is
+ * cosmetic and must never cost a round trip to discover.
+ */
+async function getSignedPosterUrl(incident) {
+  const filename = posterFilename(incident && incident.clipPath);
+  if (!filename) return null;
+  requireBaseUrl();
+  const { token } = signClipToken(filename, POSTER_TTL);
+  return { url: buildUrl(filename, token) };
+}
+
+/**
+ * Batch form of getSignedPosterUrl. One call per grid render instead of one per
+ * card -- signing is cheap, HTTP round trips over a tunnel are not.
+ *
+ * @param {Array<object>} incidents - already facility-scoped
+ * @returns {Promise<Record<string, string>>} incident _id -> poster URL.
+ *   Incidents without a usable clip are omitted rather than mapped to null, so
+ *   the caller can treat presence as "there is a thumbnail to try".
+ */
+async function getSignedPosterUrls(incidents = []) {
+  const out = {};
+  for (const incident of incidents) {
+    const filename = posterFilename(incident && incident.clipPath);
+    if (!filename) continue;
+    requireBaseUrl();
+    const { token } = signClipToken(filename, POSTER_TTL);
+    out[String(incident._id)] = buildUrl(filename, token);
+  }
+  return out;
+}
+
+/**
+ * Ask ai_core to delete one incident's clip and poster from the mini PC.
+ *
+ * Uses a DELETE-scoped token, which a playback token cannot substitute for
+ * (see utils/clipToken.js). Short TTL: it is minted and spent inside this one
+ * request and never reaches a browser.
+ *
+ * Treats "already gone" as success. The caller's next step is to clear
+ * clipPath on the incident, and refusing to do that because the file was
+ * already missing would leave a permanently broken card that can never be
+ * cleaned up.
+ *
+ * @returns {Promise<{ deleted: string[] }>}
+ * @throws when ai_core is unreachable or refuses -- the caller must NOT clear
+ *   clipPath in that case, or the record would claim a deletion that never
+ *   happened.
+ */
+async function deleteClip(incident) {
+  const filename = clipFilename(incident && incident.clipPath);
+  if (!filename) return { deleted: [] };
+  requireBaseUrl();
+
+  const { token } = signClipDeleteToken(filename);
+  const url = buildUrl(filename, token);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let res;
+  try {
+    res = await fetch(url, { method: 'DELETE', signal: controller.signal });
+  } catch (err) {
+    throw new Error(
+      `Could not reach the recorder to delete this clip: ${err.message}`
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!res.ok) {
+    throw new Error(
+      `The recorder refused to delete this clip (HTTP ${res.status})`
+    );
+  }
+
+  const body = await res.json().catch(() => ({}));
+  return { deleted: Array.isArray(body.deleted) ? body.deleted : [] };
+}
+
+module.exports = {
+  getSignedClipUrl,
+  getSignedPosterUrl,
+  getSignedPosterUrls,
+  deleteClip,
+  clipFilename,
+  posterFilename,
+};

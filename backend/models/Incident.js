@@ -45,6 +45,17 @@ const incidentSchema = new mongoose.Schema(
     trackId: { type: Number },
     alertKey: { type: String, index: true },
     clipPath: { type: String },
+    // Free-text correction/context a nurse or admin attaches when
+    // reviewing the recording. Capped so one pasted handover note
+    // cannot bloat every incident query that returns this document.
+    note: { type: String, maxlength: 500, default: '' },
+    // Set when a clip is deleted. The INCIDENT survives deliberately:
+    // removing the recording must not erase the fact that a fall was
+    // detected, or the deletion would quietly rewrite the facility's
+    // incident statistics. clipPath is cleared, these two remember
+    // that a recording once existed and who removed it.
+    clipDeletedAt: { type: Date },
+    clipDeletedBy: { type: String },
     isResolved: { type: Boolean, default: false, index: true },
     resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     resolvedAt: { type: Date },

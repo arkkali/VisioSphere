@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 const Incident = require('../models/Incident');
 
+// Cap on ids accepted by the thumbnail batch endpoint. Matches the clip
+// list's own page size ceiling; a larger batch would mean signing tokens
+// for clips that are not on screen.
+const MAX_BATCH_IDS = 100;
+
 async function getIncidents(query) {
   const {
     since,
@@ -50,6 +55,141 @@ async function getIncidents(query) {
 async function getIncidentById(id) {
   validateObjectId(id);
   return Incident.findById(id).lean();
+}
+
+/**
+ * Load several incidents at once, for the thumbnail batch endpoint.
+ *
+ * FACILITY SAFETY: same story as getIncidentById -- the facilityScope plugin's
+ * pre('find') hook rewrites this to include the caller's facility, so ids
+ * belonging to the other facility simply do not come back. A caller can
+ * therefore pass any ids they like and still only ever learn about their own.
+ * Invalid ObjectIds are dropped rather than throwing, because one malformed id
+ * in a batch of fifty should not fail the whole grid.
+ */
+async function getIncidentsByIds(ids = []) {
+  const valid = ids
+    .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    .slice(0, MAX_BATCH_IDS);
+  if (!valid.length) return [];
+  return Incident.find({ _id: { $in: valid } })
+    .select('_id clipPath')
+    .lean();
+}
+
+/**
+ * Severity implied by an incident type.
+ *
+ * Reclassifying has to move severity too. ai_core sets severity from its own
+ * alert level at detection time, so an incident that came in as "Fall" carries
+ * Emergency. Relabel it "False Alarm" and leave severity alone, and it keeps
+ * counting toward the Emergency totals on the dashboard and in the weekly
+ * chart -- the correction would show in the clip list while the statistics
+ * still reported the mistake. An explicit severity in the payload overrides
+ * this.
+ */
+const SEVERITY_FOR_TYPE = {
+  'Fall': 'Emergency',
+  'Prolonged Fall': 'Emergency',
+  'Lying Down': 'Warning',
+  'Agitation': 'Warning',
+  'Inactivity': 'Warning',
+  'Inactivity (Posture)': 'Warning',
+  'Unusual Movement': 'Warning',
+  'False Alarm': 'Info',
+};
+
+/** Values Incident.incidentType actually accepts, read off the schema itself
+ *  so this can never drift from the model's enum. */
+const ALLOWED_INCIDENT_TYPES = Incident.schema.path('incidentType').enumValues;
+
+/**
+ * Correct one incident's classification and/or attach a note.
+ *
+ * Returns { incident, before } so the caller can write a meaningful audit entry
+ * -- an audit log that records only the new value cannot answer "what did this
+ * used to say", which is the question anyone reviewing a correction will ask.
+ */
+async function updateIncidentDetails(id, changes = {}) {
+  validateObjectId(id);
+
+  const before = await Incident.findById(id).lean();
+  if (!before) {
+    const err = new Error('Incident not found');
+    err.status = 404;
+    throw err;
+  }
+
+  const update = {};
+
+  if (changes.incidentType !== undefined) {
+    if (!ALLOWED_INCIDENT_TYPES.includes(changes.incidentType)) {
+      const err = new Error(
+        `Invalid event type. Expected one of: ${ALLOWED_INCIDENT_TYPES.join(', ')}`
+      );
+      err.status = 400;
+      throw err;
+    }
+    update.incidentType = changes.incidentType;
+    update.severity =
+      changes.severity || SEVERITY_FOR_TYPE[changes.incidentType] || before.severity;
+  } else if (changes.severity !== undefined) {
+    update.severity = changes.severity;
+  }
+
+  if (changes.note !== undefined) {
+    if (typeof changes.note !== 'string') {
+      const err = new Error('Note must be text');
+      err.status = 400;
+      throw err;
+    }
+    if (changes.note.length > 500) {
+      const err = new Error('Note is too long (500 characters maximum)');
+      err.status = 400;
+      throw err;
+    }
+    update.note = changes.note.trim();
+  }
+
+  if (!Object.keys(update).length) {
+    const err = new Error('Nothing to update');
+    err.status = 400;
+    throw err;
+  }
+
+  const incident = await Incident.findByIdAndUpdate(id, update, {
+    returnDocument: 'after',
+    runValidators: true,
+  });
+
+  return { incident, before };
+}
+
+/**
+ * Clear the clip reference after the file has actually been deleted on the
+ * recorder. Call this ONLY after videoService.deleteClip resolves -- clearing
+ * first would leave a record claiming the recording is gone while the file
+ * sits on disk.
+ *
+ * The incident document itself is kept. See the comment on clipDeletedAt in
+ * models/Incident.js for why.
+ */
+async function clearClipPath(id, actorName) {
+  validateObjectId(id);
+  const incident = await Incident.findByIdAndUpdate(
+    id,
+    {
+      $unset: { clipPath: '' },
+      $set: { clipDeletedAt: new Date(), clipDeletedBy: actorName || 'Unknown' },
+    },
+    { returnDocument: 'after' }
+  );
+  if (!incident) {
+    const err = new Error('Incident not found');
+    err.status = 404;
+    throw err;
+  }
+  return incident;
 }
 
 async function getUnreadCount(since) {
@@ -266,6 +406,11 @@ async function resolveIncident(id, userId, falsePositive) {
 module.exports = {
   getIncidents,
   getIncidentById,
+  getIncidentsByIds,
+  updateIncidentDetails,
+  clearClipPath,
+  ALLOWED_INCIDENT_TYPES,
+  MAX_BATCH_IDS,
   getUnreadCount,
   getDailyStats,
   getWeeklyStats,
