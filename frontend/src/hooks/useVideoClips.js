@@ -14,9 +14,6 @@ import {
   deleteClip as deleteClipRequest,
 } from '../services/videoClipsService';
 
-const DEFAULT_VISIBLE_COUNT = 6;
-const SHOW_MORE_INCREMENT = 6;
-
 // Matches the backend's own default window when `since` is omitted (see
 // incidentService.js getIncidents: `since ? new Date(since) : new
 // Date(Date.now() - 7*24*60*60*1000)`). Kept as a plain label rather than a
@@ -78,7 +75,6 @@ export function useVideoClips() {
   const [selectedHouseId, setSelectedHouseId] = useState(ALL_HOUSES);
   const [activeEventType, setActiveEventType] = useState('all');
   const [search, setSearch] = useState('');
-  const [visibleCounts, setVisibleCounts] = useState({});
   const [sortBy, setSortBy] = useState('newest');
 
   // Ids ticked for bulk deletion. A Set, not an array: selection is membership,
@@ -310,13 +306,6 @@ export function useVideoClips() {
     setSelectionMode(false);
   }, []);
 
-  const showMoreForHouse = useCallback((houseId) => {
-    setVisibleCounts((prev) => ({
-      ...prev,
-      [houseId]: (prev[houseId] || DEFAULT_VISIBLE_COUNT) + SHOW_MORE_INCREMENT,
-    }));
-  }, []);
-
   return {
     loading,
     error,
@@ -330,8 +319,6 @@ export function useVideoClips() {
     setSearch,
     dateRangeLabel: DATE_RANGE_LABEL,
     groupedClips,
-    visibleCounts,
-    showMoreForHouse,
     sortBy,
     setSortBy,
     sortOptions: SORT_OPTIONS,

@@ -116,10 +116,20 @@ const ClipPlayer = ({ clip, onClose }) => {
     let reason;
     if (code === 3 || upper.includes('UNSUPPORTED') || upper.includes('DECODE')) {
       reason = 'decode';
-    } else if (code === 2 || upper.includes('COULD_NOT_OPEN') || upper.includes('NETWORK')) {
+    } else if (
+      code === 2 ||
+      upper.includes('COULD_NOT_OPEN') ||
+      upper.includes('FAILED TO OPEN') ||   // Chrome/Edge wording when the request never succeeded
+      upper.includes('NETWORK') ||
+      upper.includes('404') ||
+      upper.includes('403')
+    ) {
       reason = 'transport';
     } else {
-      reason = 'unknown';
+      // Code 4 with no recognisable text is far more often "the server did not
+      // answer" than "no decoder" — a missing decoder almost always names the
+      // format. Defaulting to transport points at the likelier layer.
+      reason = code === 4 ? 'transport' : 'unknown';
     }
 
     console.error('[VideoPlayerModal] playback failed', { code, detail, url: resolvedUrl });
@@ -132,8 +142,9 @@ const ClipPlayer = ({ clip, onClose }) => {
         'recorded as mp4v. The recorder needs the H.264 transcode step.';
     }
     if (failure.reason === 'transport') {
-      return 'The clip could not be fetched from the recorder. The playback ' +
-        'link may have expired, or the recorder is not serving this file.';
+      return 'The clip could not be fetched. The clip server on the mini PC ' +
+        'may be stopped, or the playback link expired — close and reopen to ' +
+        'request a fresh one.';
     }
     return 'This clip could not be played.';
   };

@@ -7,7 +7,11 @@ import { useNavigate } from 'react-router-dom';
 // on the house data itself.
 const HOUSE_DOT_COLORS = ['bg-[#00a8e8]', 'bg-[#22c55e]', 'bg-[#a855f7]', 'bg-[#f97316]', 'bg-[#eab308]'];
 
-const HouseSelector = ({ houses, selectedHouseId, onSelect, showManageCctv }) => {
+// `actions` is rendered on the right, beside Manage CCTV. The clip-selection
+// controls live there rather than in their own row: they act on the same set
+// of clips the house pills choose, so keeping them on one line ties the two
+// together and saves a band of vertical space above the grid.
+const HouseSelector = ({ houses, selectedHouseId, onSelect, showManageCctv, actions }) => {
   const navigate = useNavigate();
 
   return (
@@ -49,7 +53,10 @@ const HouseSelector = ({ houses, selectedHouseId, onSelect, showManageCctv }) =>
         </div>
       </div>
 
-      {showManageCctv && (
+      <div className="flex items-center gap-2 shrink-0">
+        {actions}
+
+        {showManageCctv && (
         <button
           onClick={() => navigate('/admin/monitoring')}
           className="flex items-center gap-2 py-[9px] px-[14px] rounded-[12px] border border-[#e2e8f0] dark:border-[#00435c] bg-white dark:bg-[#00212e] text-[0.78rem] font-bold text-[#00212e] dark:text-white whitespace-nowrap hover:border-[#00a8e8]/50 transition-colors shrink-0"
@@ -60,7 +67,8 @@ const HouseSelector = ({ houses, selectedHouseId, onSelect, showManageCctv }) =>
           </svg>
           Manage CCTV
         </button>
-      )}
+        )}
+      </div>
     </div>
   );
 };

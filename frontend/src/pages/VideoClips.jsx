@@ -44,8 +44,6 @@ const VideoClips = () => {
     setSearch,
     dateRangeLabel,
     groupedClips,     // [{ houseId, houseName, clips: [...] }] — already filtered
-    visibleCounts,    // { [houseId]: number } — cards to show before "show more"
-    showMoreForHouse, // (houseId) => void
     sortBy,
     setSortBy,
     sortOptions,
@@ -68,6 +66,47 @@ const VideoClips = () => {
   const selectedClips = useMemo(
     () => visibleClips.filter((c) => selectedIds.has(c.id)),
     [visibleClips, selectedIds]
+  );
+
+  // Selection controls, rendered beside Manage CCTV. Only offered to users who
+  // may actually delete — showing "Select to delete" to someone whose every
+  // delete returns 403 is worse than not showing it at all.
+  const selectionControls = !canDelete ? null : selectionMode ? (
+    <>
+      <span className="text-[0.75rem] font-bold text-[#00212e] dark:text-white whitespace-nowrap px-1">
+        {selectedIds.size} selected
+      </span>
+      <button
+        onClick={selectAllVisible}
+        className="py-[9px] px-[12px] rounded-[12px] text-[0.75rem] font-bold text-[#00212e] dark:text-white bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/60 transition-colors whitespace-nowrap"
+      >
+        Select all
+      </button>
+      <button
+        onClick={exitSelectionMode}
+        className="py-[9px] px-[12px] rounded-[12px] text-[0.75rem] font-bold text-[#5a6265] dark:text-[#a6aeb2] bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/60 transition-colors"
+      >
+        Cancel
+      </button>
+      <button
+        onClick={() => setPendingDelete(selectedClips)}
+        disabled={selectedIds.size === 0}
+        className="py-[9px] px-[14px] rounded-[12px] text-[0.75rem] font-bold text-white bg-[#e11d48] hover:bg-[#be123c] transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+      >
+        Delete Selected
+      </button>
+    </>
+  ) : (
+    <button
+      onClick={() => setSelectionMode(true)}
+      className="flex items-center gap-2 py-[9px] px-[14px] rounded-[12px] text-[0.78rem] font-bold text-[#00212e] dark:text-white bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/50 transition-colors whitespace-nowrap"
+    >
+      <svg className="w-4 h-4 text-[#5a6265] dark:text-[#a6aeb2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="9 11 12 14 22 4" />
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+      </svg>
+      Select to delete
+    </button>
   );
 
   return (
@@ -110,57 +149,11 @@ const VideoClips = () => {
                 houses={houses}
                 selectedHouseId={selectedHouseId}
                 onSelect={setSelectedHouseId}
-                showManageCctv={!isNurseView}
+                showManageCctv={!isNurseView && !selectionMode}
+                actions={selectionControls}
               />
             </div>
           </div>
-
-          {/* Selection bar. Only rendered for users who may actually delete —
-              offering "Select" to someone whose every delete returns 403 is
-              worse than not offering it. */}
-          {canDelete && (
-            <div className="px-5 lg:px-6 pb-3 shrink-0">
-              {selectionMode ? (
-                <div className="flex items-center justify-between gap-3 flex-wrap py-2.5 px-3.5 rounded-[12px] bg-[#eaf8fe] dark:bg-[#0075a2]/20 border border-[#00a8e8]/40">
-                  <p className="m-0 text-[0.78rem] font-bold text-[#00212e] dark:text-white">
-                    {selectedIds.size} selected
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={selectAllVisible}
-                      className="py-[7px] px-[12px] rounded-[10px] text-[0.75rem] font-bold text-[#00212e] dark:text-white bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/60 transition-colors"
-                    >
-                      Select all shown
-                    </button>
-                    <button
-                      onClick={exitSelectionMode}
-                      className="py-[7px] px-[12px] rounded-[10px] text-[0.75rem] font-bold text-[#5a6265] dark:text-[#a6aeb2] bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/60 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => setPendingDelete(selectedClips)}
-                      disabled={selectedIds.size === 0}
-                      className="py-[7px] px-[14px] rounded-[10px] text-[0.75rem] font-bold text-white bg-[#e11d48] hover:bg-[#be123c] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Delete Selected
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setSelectionMode(true)}
-                  className="flex items-center gap-2 py-[8px] px-[13px] rounded-[10px] text-[0.75rem] font-bold text-[#5a6265] dark:text-[#a6aeb2] bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/60 hover:text-[#00a8e8] transition-colors"
-                >
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="9 11 12 14 22 4" />
-                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                  </svg>
-                  Select to delete
-                </button>
-              )}
-            </div>
-          )}
 
           {/* Clip grid */}
           <div className="flex-1 overflow-y-auto p-5 lg:p-6 pt-4">
@@ -191,8 +184,6 @@ const VideoClips = () => {
                     key={group.houseId}
                     houseName={group.houseName}
                     clips={group.clips}
-                    visibleCount={visibleCounts[group.houseId] || 6}
-                    onShowMore={() => showMoreForHouse(group.houseId)}
                     onSelectClip={setSelectedClip}
                     onEditClip={setEditingClip}
                     onDeleteClip={setPendingDelete}
