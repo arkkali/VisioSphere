@@ -271,7 +271,21 @@ export async function deleteClip(incidentId) {
  *  independently; this only decides whether to render the control. */
 export function canDeleteClips() {
   try {
-    return localStorage.getItem('userRole') === 'Facility Admin';
+    // Two signals, either of which is enough. userRole is the exact string the
+    // backend's authorizeRoles() checks, but it is a display value that has
+    // drifted before ('Administrator' appears as a fallback in
+    // AdminDashboard.jsx), and a mismatch there silently HIDES the control
+    // rather than erroring — the worst kind of failure, because it looks like
+    // the feature was never built. adminId is set at login for admins only and
+    // is a far more stable signal.
+    //
+    // Being permissive here is safe: the backend independently enforces
+    // authorizeRoles('Facility Admin') on DELETE, so the worst case for a
+    // non-admin is a 403 they can see, not access they should not have.
+    return (
+      localStorage.getItem('userRole') === 'Facility Admin' ||
+      !!localStorage.getItem('adminId')
+    );
   } catch (_) {
     return false;
   }

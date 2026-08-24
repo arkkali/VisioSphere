@@ -33,6 +33,40 @@ const DATE_RANGE_LABEL = 'Last 7 Days';
 // the filter below explicitly excludes it.
 const ALL_HOUSES = 'all';
 
+/**
+ * Sort orders offered in the toolbar.
+ *
+ * 'newest' stays the default: this is a monitoring archive, and the thing a
+ * nurse coming on shift needs first is what happened most recently.
+ */
+export const SORT_OPTIONS = [
+  { id: 'newest', label: 'Newest first' },
+  { id: 'oldest', label: 'Oldest first' },
+  { id: 'type',   label: 'Event type' },
+  { id: 'severity', label: 'Most severe first' },
+];
+
+// Ranked so the orders that matter clinically sort first. Anything unlisted
+// falls to the end rather than colliding at 0 with genuine emergencies.
+const SEVERITY_RANK = { Fall: 0, 'Lying Down': 1, Agitation: 2, Inactivity: 3 };
+const rankOf = (clip) =>
+  SEVERITY_RANK[clip.eventType] ?? Number.MAX_SAFE_INTEGER;
+
+const byTime = (a, b, dir) =>
+  dir * (new Date(a.timestamp) - new Date(b.timestamp));
+
+const comparatorFor = (sortBy) => {
+  if (sortBy === 'oldest') return (a, b) => byTime(a, b, 1);
+  if (sortBy === 'type') {
+    return (a, b) =>
+      String(a.eventType).localeCompare(String(b.eventType)) || byTime(a, b, -1);
+  }
+  if (sortBy === 'severity') {
+    return (a, b) => rankOf(a) - rankOf(b) || byTime(a, b, -1);
+  }
+  return (a, b) => byTime(a, b, -1); // newest
+};
+
 const OTHER_GROUP_ID = '__other__';
 const OTHER_GROUP_NAME = 'Other Cameras';
 
@@ -45,6 +79,12 @@ export function useVideoClips() {
   const [activeEventType, setActiveEventType] = useState('all');
   const [search, setSearch] = useState('');
   const [visibleCounts, setVisibleCounts] = useState({});
+  const [sortBy, setSortBy] = useState('newest');
+
+  // Ids ticked for bulk deletion. A Set, not an array: selection is membership,
+  // and every render asks "is this card selected" once per card.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
 
   // Camera groups for the current facility — resolved once; a user is not
   // reassigned to a different facility mid-session without a fresh login,
@@ -136,9 +176,12 @@ export function useVideoClips() {
       }
     }
 
-    // Newest first within each group.
+    // Sort within each group. Grouping is by camera and is not affected by the
+    // chosen order — sorting across groups would flatten the layout the page is
+    // built around.
+    const compare = comparatorFor(sortBy);
     for (const bucket of buckets.values()) {
-      bucket.clips.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      bucket.clips.sort(compare);
     }
 
     let groups = Array.from(buckets.values()).filter((g) => g.clips.length > 0);
@@ -156,7 +199,7 @@ export function useVideoClips() {
     }
 
     return groups;
-  }, [clips, activeEventType, search, selectedHouseId, cameraGroups]);
+  }, [clips, activeEventType, search, selectedHouseId, cameraGroups, sortBy]);
 
   /**
    * Apply a correction and patch the one clip in place.
@@ -195,6 +238,78 @@ export function useVideoClips() {
     setClips((prev) => prev.filter((c) => c.id !== clipId));
   }, []);
 
+  // ---------------------------------------------------------------------
+  // Selection (for bulk delete)
+  // ---------------------------------------------------------------------
+  const toggleSelected = useCallback((clipId) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(clipId)) next.delete(clipId);
+      else next.add(clipId);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  /** Tick every clip currently visible under the active filters. Deliberately
+   *  scoped to what is on screen — "select all" that silently included clips
+   *  hidden by a filter would delete things the user never saw. */
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds(new Set(groupedClips.flatMap((g) => g.clips.map((c) => c.id))));
+  }, [groupedClips]);
+
+  /**
+   * Delete several recordings.
+   *
+   * Sequential, not Promise.all: each delete is a round trip to the mini PC
+   * through the tunnel, and firing a dozen at once risks tripping the write
+   * rate limiter — which would surface as random failures that look like data
+   * loss. Slower and predictable beats faster and confusing here.
+   *
+   * Partial failure is reported honestly rather than swallowed. Only the clips
+   * that actually deleted leave the grid; the rest stay, still selected, so a
+   * retry is one click and nothing silently vanishes from the UI while its
+   * file is still on disk.
+   */
+  const removeClips = useCallback(async (clipIds) => {
+    const deleted = [];
+    const failed = [];
+
+    for (const id of clipIds) {
+      try {
+        await deleteClipRequest(id);
+        deleted.push(id);
+      } catch (err) {
+        console.error('[useVideoClips] delete failed for', id, err);
+        failed.push(id);
+      }
+    }
+
+    if (deleted.length) {
+      const gone = new Set(deleted);
+      setClips((prev) => prev.filter((c) => !gone.has(c.id)));
+    }
+    setSelectedIds(new Set(failed));
+
+    if (failed.length) {
+      const err = new Error(
+        deleted.length
+          ? `Deleted ${deleted.length}, but ${failed.length} could not be removed. Those are still selected.`
+          : `Could not delete ${failed.length} recording${failed.length > 1 ? 's' : ''}.`
+      );
+      err.partial = { deleted: deleted.length, failed: failed.length };
+      throw err;
+    }
+
+    setSelectionMode(false);
+  }, []);
+
   const showMoreForHouse = useCallback((houseId) => {
     setVisibleCounts((prev) => ({
       ...prev,
@@ -217,8 +332,19 @@ export function useVideoClips() {
     groupedClips,
     visibleCounts,
     showMoreForHouse,
+    sortBy,
+    setSortBy,
+    sortOptions: SORT_OPTIONS,
+    selectionMode,
+    setSelectionMode,
+    selectedIds,
+    toggleSelected,
+    clearSelection,
+    exitSelectionMode,
+    selectAllVisible,
     editClip,
     removeClip,
+    removeClips,
     reload: loadClips,
   };
 }

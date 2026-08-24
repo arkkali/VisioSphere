@@ -4,8 +4,7 @@
 // videoClipsService.js's mapIncidentToClip) — it is only ever populated
 // client-side, in VideoPlayerModal, once a clip has been played and its real
 // duration read from the video element. A permanent "--:--" placeholder would
-// look broken since it would never resolve on a card nobody has opened;
-// omitting the badge reads as "duration not yet known".
+// look broken since it would never resolve on a card nobody has opened.
 //
 // The thumbnail is a signed poster URL fetched in batch by useVideoClips. It
 // can legitimately be absent (clips recorded before ai_core wrote posters) or
@@ -21,7 +20,16 @@ const BADGE_STYLES = {
   Inactivity:   { bg: 'bg-[#eab308]', label: 'INACTIVITY' },
 };
 
-const VideoClipCard = ({ clip, onSelect, onEdit, onDelete, canDelete }) => {
+const VideoClipCard = ({
+  clip,
+  onSelect,
+  onEdit,
+  onDelete,
+  canDelete,
+  selectionMode,
+  selected,
+  onToggleSelect,
+}) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [thumbFailed, setThumbFailed] = useState(false);
   const menuRef = useRef(null);
@@ -41,13 +49,31 @@ const VideoClipCard = ({ clip, onSelect, onEdit, onDelete, canDelete }) => {
 
   const showThumb = clip.thumbnail && !thumbFailed;
 
+  // In selection mode the thumbnail ticks the checkbox instead of opening the
+  // player. Opening a video modal on the way to deleting a dozen clips would
+  // make bulk selection unusable.
+  const handleThumbClick = () => {
+    if (selectionMode) onToggleSelect(clip.id);
+    else onSelect(clip);
+  };
+
   return (
-    <div className="relative bg-white dark:bg-[#00212e] rounded-[16px] border border-[#e2e8f0] dark:border-[#00435c] overflow-hidden hover:shadow-md transition-shadow duration-200">
+    <div
+      className={`relative bg-white dark:bg-[#00212e] rounded-[16px] border overflow-hidden transition-shadow duration-200 ${
+        selected
+          ? 'border-[#00a8e8] ring-2 ring-[#00a8e8]/40'
+          : 'border-[#e2e8f0] dark:border-[#00435c] hover:shadow-md'
+      }`}
+    >
       {/* Thumbnail */}
       <button
-        onClick={() => onSelect(clip)}
+        onClick={handleThumbClick}
         className="relative w-full aspect-video bg-gradient-to-br from-[#eaf8fe] to-[#d6f0fb] dark:from-[#00344a] dark:to-[#00212e] flex items-center justify-center cursor-pointer border-none p-0 group"
-        aria-label={`Play ${badge.label} clip from ${clip.cameraName} at ${clip.timeLabel}`}
+        aria-label={
+          selectionMode
+            ? `${selected ? 'Deselect' : 'Select'} ${badge.label} clip from ${clip.timeLabel}`
+            : `Play ${badge.label} clip from ${clip.cameraName} at ${clip.timeLabel}`
+        }
       >
         {showThumb && (
           <img
@@ -60,7 +86,8 @@ const VideoClipCard = ({ clip, onSelect, onEdit, onDelete, canDelete }) => {
         )}
 
         {/* Scrim only when there is an image behind it — the badges need
-            contrast over real footage, but would look muddy over the gradient. */}
+            contrast over real footage, but it would look muddy over the
+            gradient placeholder. */}
         {showThumb && (
           <span className="absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/25" />
         )}
@@ -72,11 +99,27 @@ const VideoClipCard = ({ clip, onSelect, onEdit, onDelete, canDelete }) => {
           {clip.timeLabel}
         </span>
 
-        <span className="relative z-10 w-[42px] h-[42px] rounded-full bg-[#00a8e8] flex items-center justify-center shadow-[0_4px_10px_rgba(0,168,232,0.35)] group-hover:scale-110 transition-transform duration-150">
-          <svg viewBox="0 0 24 24" fill="white" className="w-[16px] h-[16px] ml-[2px]">
-            <path d="M8 5v14l11-7z" />
-          </svg>
-        </span>
+        {selectionMode ? (
+          <span
+            className={`relative z-10 w-[34px] h-[34px] rounded-full flex items-center justify-center border-2 transition-colors ${
+              selected
+                ? 'bg-[#00a8e8] border-[#00a8e8]'
+                : 'bg-white/85 dark:bg-[#00212e]/85 border-white/90 dark:border-[#00567a]'
+            }`}
+          >
+            {selected && (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            )}
+          </span>
+        ) : (
+          <span className="relative z-10 w-[42px] h-[42px] rounded-full bg-[#00a8e8] flex items-center justify-center shadow-[0_4px_10px_rgba(0,168,232,0.35)] group-hover:scale-110 transition-transform duration-150">
+            <svg viewBox="0 0 24 24" fill="white" className="w-[16px] h-[16px] ml-[2px]">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </span>
+        )}
 
         {clip.duration && (
           <span className="absolute bottom-2 right-2 z-10 text-[0.65rem] font-bold text-white bg-black/55 px-[6px] py-[1px] rounded-[4px]">
@@ -105,47 +148,52 @@ const VideoClipCard = ({ clip, onSelect, onEdit, onDelete, canDelete }) => {
           )}
         </div>
 
-        <div className="relative shrink-0" ref={menuRef}>
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Clip actions"
-            className="w-[22px] h-[22px] flex items-center justify-center rounded-md text-[#9dabb1] dark:text-[#668894] hover:bg-[#f1f5f9] dark:hover:bg-[#00435c] transition-colors"
-          >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-              <circle cx="5" cy="12" r="2" />
-              <circle cx="12" cy="12" r="2" />
-              <circle cx="19" cy="12" r="2" />
-            </svg>
-          </button>
+        {/* Hidden during selection mode: per-card actions alongside a bulk
+            selection are two ways to do the same thing, and the wrong one is
+            destructive. */}
+        {!selectionMode && (
+          <div className="relative shrink-0" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Clip actions"
+              className="w-[24px] h-[24px] flex items-center justify-center rounded-md text-[#9dabb1] dark:text-[#668894] hover:bg-[#f1f5f9] dark:hover:bg-[#00435c] hover:text-[#00a8e8] transition-colors"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <circle cx="5" cy="12" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <circle cx="19" cy="12" r="2" />
+              </svg>
+            </button>
 
-          {menuOpen && (
-            <div className="absolute right-0 bottom-[26px] z-30 bg-white dark:bg-[#00435c] rounded-[10px] shadow-lg border border-[#eaf8fe] dark:border-[#00212e] py-1.5 w-[168px]">
-              <button
-                onClick={() => { onSelect(clip); setMenuOpen(false); }}
-                className="w-full text-left px-3 py-[7px] text-[0.75rem] font-semibold text-[#00212e] dark:text-white hover:bg-[#f9fdfe] dark:hover:bg-[#00212e]"
-              >
-                View Clip
-              </button>
-              <button
-                onClick={() => { onEdit(clip); setMenuOpen(false); }}
-                className="w-full text-left px-3 py-[7px] text-[0.75rem] font-semibold text-[#00212e] dark:text-white hover:bg-[#f9fdfe] dark:hover:bg-[#00212e]"
-              >
-                Edit Details
-              </button>
-              {/* Deleting footage is admin-only. The backend enforces this
-                  independently; hiding the control just avoids offering an
-                  action that would only come back as a 403. */}
-              {canDelete && (
+            {menuOpen && (
+              <div className="absolute right-0 bottom-[28px] z-30 bg-white dark:bg-[#00435c] rounded-[10px] shadow-lg border border-[#eaf8fe] dark:border-[#00212e] py-1.5 w-[168px]">
                 <button
-                  onClick={() => { onDelete(clip); setMenuOpen(false); }}
-                  className="w-full text-left px-3 py-[7px] text-[0.75rem] font-semibold text-[#e11d48] dark:text-[#ff6b81] hover:bg-[#fff1f2] dark:hover:bg-[#ff4757]/10"
+                  onClick={() => { onSelect(clip); setMenuOpen(false); }}
+                  className="w-full text-left px-3 py-[7px] text-[0.75rem] font-semibold text-[#00212e] dark:text-white hover:bg-[#f9fdfe] dark:hover:bg-[#00212e]"
                 >
-                  Delete Clip
+                  View Clip
                 </button>
-              )}
-            </div>
-          )}
-        </div>
+                <button
+                  onClick={() => { onEdit(clip); setMenuOpen(false); }}
+                  className="w-full text-left px-3 py-[7px] text-[0.75rem] font-semibold text-[#00212e] dark:text-white hover:bg-[#f9fdfe] dark:hover:bg-[#00212e]"
+                >
+                  Edit Details
+                </button>
+                {/* Deleting footage is admin-only. The backend enforces this
+                    independently on DELETE /incidents/:id/clip; hiding the
+                    entry only avoids offering an action that returns 403. */}
+                {canDelete && (
+                  <button
+                    onClick={() => { onDelete(clip); setMenuOpen(false); }}
+                    className="w-full text-left px-3 py-[7px] text-[0.75rem] font-semibold text-[#e11d48] dark:text-[#ff6b81] hover:bg-[#fff1f2] dark:hover:bg-[#ff4757]/10"
+                  >
+                    Delete Clip
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

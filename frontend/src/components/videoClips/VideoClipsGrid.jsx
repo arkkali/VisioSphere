@@ -14,6 +14,9 @@ const VideoClipsGrid = ({
   onEditClip,
   onDeleteClip,
   canDelete,
+  selectionMode,
+  selectedIds,
+  onToggleSelect,
 }) => {
   const visibleClips = clips.slice(0, visibleCount);
   const hasMore = clips.length > visibleCount;
@@ -37,6 +40,9 @@ const VideoClipsGrid = ({
               onEdit={onEditClip}
               onDelete={onDeleteClip}
               canDelete={canDelete}
+              selectionMode={selectionMode}
+              selected={selectedIds?.has(clip.id) || false}
+              onToggleSelect={onToggleSelect}
             />
           ))}
         </div>

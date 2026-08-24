@@ -1,35 +1,42 @@
 // frontend/src/components/videoClips/DeleteClipDialog.jsx
 //
-// A plain confirm() would be cheaper, but this deletes CCTV footage of a
-// detected fall from a care facility. The dialog is explicit about two things
-// people get wrong about that:
+// Handles one clip or many. A plain confirm() would be cheaper, but this
+// deletes CCTV footage of detected falls from a care facility, and the dialog
+// is explicit about the two things people get wrong about that:
 //
-//   1. It is PERMANENT. The file is removed from the recorder's disk; there is
-//      no soft-delete and no undo.
-//   2. The INCIDENT SURVIVES. Deleting the video does not delete the fall from
-//      the reports. Staff who assume otherwise might delete footage expecting
-//      the event to disappear from the statistics — it will not, and that is
-//      deliberate.
+//   1. It is PERMANENT. The files are removed from the recorder's disk; there
+//      is no soft-delete and no undo.
+//   2. The INCIDENTS SURVIVE. Deleting footage does not remove the falls from
+//      the reports. Staff who assume otherwise might delete recordings
+//      expecting the events to disappear from the statistics — they will not,
+//      and that is deliberate.
 
 import React, { useState } from 'react';
 
-const DeleteClipDialog = ({ clip, onClose, onConfirm }) => {
+const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
 
-  if (!clip) return null;
+  // Accepts a single clip or an array, so the same dialog serves the row menu
+  // and bulk selection. One confirmation path means one place where the
+  // warning wording can drift out of date.
+  const list = !clips ? [] : Array.isArray(clips) ? clips : [clips];
+  if (!list.length) return null;
+
+  const many = list.length > 1;
 
   const handleConfirm = async () => {
     setDeleting(true);
     setError(null);
     try {
-      await onConfirm(clip.id);
+      await onConfirm(list.map((c) => c.id));
       onClose();
     } catch (err) {
       console.error('[DeleteClipDialog] delete failed:', err);
       setError(
+        err?.message ||
         err?.response?.data?.message ||
-        'Could not delete the recording. The recorder may be offline — the clip has not been removed.'
+        'Could not delete. The recorder may be offline — nothing was removed.'
       );
       setDeleting(false);
     }
@@ -41,7 +48,7 @@ const DeleteClipDialog = ({ clip, onClose, onConfirm }) => {
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-[#00212e] rounded-[20px] shadow-2xl w-full max-w-[420px] overflow-hidden"
+        className="bg-white dark:bg-[#00212e] rounded-[20px] shadow-2xl w-full max-w-[440px] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 flex items-start gap-3">
@@ -50,19 +57,32 @@ const DeleteClipDialog = ({ clip, onClose, onConfirm }) => {
               <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
             </svg>
           </span>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="m-0 font-black text-[#00212e] dark:text-white text-sm">
-              Delete this recording?
+              {many ? `Delete ${list.length} recordings?` : 'Delete this recording?'}
             </p>
-            <p className="m-0 mt-1 text-xs text-[#5a6265] dark:text-[#a6aeb2] font-semibold">
-              {clip.eventType} · {clip.dateLabel} · {clip.timeLabel} · {clip.cameraName}
-            </p>
+
+            {many ? (
+              <div className="mt-2 max-h-[132px] overflow-y-auto pr-1">
+                {list.map((c) => (
+                  <p key={c.id} className="m-0 text-[0.72rem] text-[#5a6265] dark:text-[#a6aeb2] font-semibold leading-relaxed">
+                    {c.eventType} · {c.dateLabel} · {c.timeLabel}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="m-0 mt-1 text-xs text-[#5a6265] dark:text-[#a6aeb2] font-semibold">
+                {list[0].eventType} · {list[0].dateLabel} · {list[0].timeLabel} · {list[0].cameraName}
+              </p>
+            )}
+
             <p className="m-0 mt-2.5 text-[0.76rem] text-[#5a6265] dark:text-[#a6aeb2] font-medium leading-relaxed">
-              The video file is permanently removed from the recorder. This
-              cannot be undone.
+              {many ? 'These video files are' : 'The video file is'} permanently
+              removed from the recorder. This cannot be undone.
             </p>
             <p className="m-0 mt-2 text-[0.76rem] text-[#5a6265] dark:text-[#a6aeb2] font-medium leading-relaxed">
-              The event itself stays in the records and continues to count in
+              {many ? 'The events themselves stay' : 'The event itself stays'} in
+              the records and {many ? 'continue' : 'continues'} to count in
               reports — only the footage is deleted. Your name and the time are
               written to the audit trail.
             </p>
@@ -88,7 +108,9 @@ const DeleteClipDialog = ({ clip, onClose, onConfirm }) => {
             disabled={deleting}
             className="py-[9px] px-[18px] rounded-[12px] bg-[#e11d48] text-white text-[0.78rem] font-bold hover:bg-[#be123c] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {deleting ? 'Deleting…' : 'Delete Recording'}
+            {deleting
+              ? 'Deleting…'
+              : many ? `Delete ${list.length} Recordings` : 'Delete Recording'}
           </button>
         </div>
       </div>

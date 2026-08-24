@@ -22,7 +22,9 @@ const VideoClips = () => {
   // Currently-open clip in the playback modal. null = modal closed.
   const [selectedClip, setSelectedClip] = useState(null);
   const [editingClip, setEditingClip] = useState(null);
-  const [deletingClip, setDeletingClip] = useState(null);
+  // Holds whatever is pending deletion: one clip from the row menu, or the
+  // whole selection. One dialog handles both.
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   // Read once per mount. The backend enforces this independently on
   // DELETE /incidents/:id/clip; this only decides whether to offer the
@@ -44,9 +46,29 @@ const VideoClips = () => {
     groupedClips,     // [{ houseId, houseName, clips: [...] }] — already filtered
     visibleCounts,    // { [houseId]: number } — cards to show before "show more"
     showMoreForHouse, // (houseId) => void
+    sortBy,
+    setSortBy,
+    sortOptions,
+    selectionMode,
+    setSelectionMode,
+    selectedIds,
+    toggleSelected,
+    exitSelectionMode,
+    selectAllVisible,
     editClip,         // (id, { incidentType, note }) => Promise
-    removeClip,       // (id) => Promise
+    removeClips,      // (ids[]) => Promise
   } = useVideoClips();
+
+  // Flattened once so the selection bar can count, and so the confirm dialog
+  // can list what is about to go by name rather than just a number.
+  const visibleClips = useMemo(
+    () => groupedClips.flatMap((g) => g.clips),
+    [groupedClips]
+  );
+  const selectedClips = useMemo(
+    () => visibleClips.filter((c) => selectedIds.has(c.id)),
+    [visibleClips, selectedIds]
+  );
 
   return (
     <div className="flex bg-[#f1f5f9] dark:bg-[#1c2c2f] h-screen w-screen overflow-hidden font-['Outfit',sans-serif] transition-colors duration-300">
@@ -77,6 +99,9 @@ const VideoClips = () => {
                 search={search}
                 onSearchChange={setSearch}
                 dateRangeLabel={dateRangeLabel}
+                sortBy={sortBy}
+                onSortChange={setSortBy}
+                sortOptions={sortOptions}
               />
             </div>
 
@@ -89,6 +114,53 @@ const VideoClips = () => {
               />
             </div>
           </div>
+
+          {/* Selection bar. Only rendered for users who may actually delete —
+              offering "Select" to someone whose every delete returns 403 is
+              worse than not offering it. */}
+          {canDelete && (
+            <div className="px-5 lg:px-6 pb-3 shrink-0">
+              {selectionMode ? (
+                <div className="flex items-center justify-between gap-3 flex-wrap py-2.5 px-3.5 rounded-[12px] bg-[#eaf8fe] dark:bg-[#0075a2]/20 border border-[#00a8e8]/40">
+                  <p className="m-0 text-[0.78rem] font-bold text-[#00212e] dark:text-white">
+                    {selectedIds.size} selected
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={selectAllVisible}
+                      className="py-[7px] px-[12px] rounded-[10px] text-[0.75rem] font-bold text-[#00212e] dark:text-white bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/60 transition-colors"
+                    >
+                      Select all shown
+                    </button>
+                    <button
+                      onClick={exitSelectionMode}
+                      className="py-[7px] px-[12px] rounded-[10px] text-[0.75rem] font-bold text-[#5a6265] dark:text-[#a6aeb2] bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/60 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => setPendingDelete(selectedClips)}
+                      disabled={selectedIds.size === 0}
+                      className="py-[7px] px-[14px] rounded-[10px] text-[0.75rem] font-bold text-white bg-[#e11d48] hover:bg-[#be123c] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Delete Selected
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setSelectionMode(true)}
+                  className="flex items-center gap-2 py-[8px] px-[13px] rounded-[10px] text-[0.75rem] font-bold text-[#5a6265] dark:text-[#a6aeb2] bg-white dark:bg-[#00212e] border border-[#e2e8f0] dark:border-[#00435c] hover:border-[#00a8e8]/60 hover:text-[#00a8e8] transition-colors"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 11 12 14 22 4" />
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                  </svg>
+                  Select to delete
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Clip grid */}
           <div className="flex-1 overflow-y-auto p-5 lg:p-6 pt-4">
@@ -123,8 +195,11 @@ const VideoClips = () => {
                     onShowMore={() => showMoreForHouse(group.houseId)}
                     onSelectClip={setSelectedClip}
                     onEditClip={setEditingClip}
-                    onDeleteClip={setDeletingClip}
+                    onDeleteClip={setPendingDelete}
                     canDelete={canDelete}
+                    selectionMode={selectionMode}
+                    selectedIds={selectedIds}
+                    onToggleSelect={toggleSelected}
                   />
                 ))}
               </div>
@@ -140,9 +215,9 @@ const VideoClips = () => {
         onSave={editClip}
       />
       <DeleteClipDialog
-        clip={deletingClip}
-        onClose={() => setDeletingClip(null)}
-        onConfirm={removeClip}
+        clips={pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={removeClips}
       />
     </div>
   );
