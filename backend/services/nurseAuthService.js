@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
 const Nurse = require('../models/Nurse');
 const AuditLog = require('../models/AuditLog');
+const { SESSION_TTL } = require('../config/session');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -101,7 +102,7 @@ exports.login = async (nurseId, password) => {
   const token = jwt.sign(
     { nurseId: nurse.nurseId, role: 'Nurse', name: `${nurse.firstName} ${nurse.lastName}`, facility: nurse.facility },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: SESSION_TTL }
   );
 
   await AuditLog.create({
@@ -142,7 +143,7 @@ exports.verify2FA = async (nurseId, pin) => {
   const token = jwt.sign(
     { nurseId: nurse.nurseId, role: 'Nurse', name: `${nurse.firstName} ${nurse.lastName}`, facility: nurse.facility },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: SESSION_TTL }
   );
 
   await AuditLog.create({

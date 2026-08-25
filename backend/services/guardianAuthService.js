@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
 const Guardian = require('../models/Guardian');
 const AuditLog = require('../models/AuditLog');
+const { SESSION_TTL } = require('../config/session');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -74,7 +75,7 @@ exports.login = async (identifier, password) => {
     throwError('Invalid password', 401);
   }
 
-  const token = jwt.sign({ guardianId: guardian.guardianId, role: 'Guardian', facility: guardian.facility }, JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ guardianId: guardian.guardianId, role: 'Guardian', facility: guardian.facility }, JWT_SECRET, { expiresIn: SESSION_TTL });
 
   await AuditLog.create({
     category: 'Authentication', event: 'Login',

@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const facilityScope = require('./plugins/facilityScope');
 const { idPrefixFor } = require('../config/facilities');
+const { ALL_HOUSES } = require('../config/facilities');
 const residentSchema = new mongoose.Schema(
   {
     residentId: {
@@ -26,14 +27,8 @@ const residentSchema = new mongoose.Schema(
     },
     house: {
       type: String,
-      enum: [
-        'House of St. Charbel',
-        'House of St. Francis',
-        'House of St. Gabriel',
-        'House of St. Rose of Lima',
-        'House of St. Sebastian',
-        'Louis S. Coson Hall'
-      ],
+      // Every facility's houses, from config/facilities.js — never retyped here.
+      enum: ALL_HOUSES,
       required: true,
     },
     status: {

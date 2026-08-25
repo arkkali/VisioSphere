@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
 const Admin = require('../models/Admin');
 const { facilityForAdminId } = require('../config/facilities');
+const { SESSION_TTL } = require('../config/session');
 const AuditLog = require('../models/AuditLog');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -113,7 +114,7 @@ exports.login = async (customId, password) => {
   const token = jwt.sign(
     { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: resolveFacility(admin) },
     JWT_SECRET,
-    { expiresIn: '24h' }
+    { expiresIn: SESSION_TTL }
   );
 
   await AuditLog.create({
@@ -147,7 +148,7 @@ exports.verify2FA = async (customId, pin) => {
   const token = jwt.sign(
     { customId: admin.customId, role: admin.role, adminId: admin._id, name: admin.name, facility: resolveFacility(admin) },
     JWT_SECRET,
-    { expiresIn: '24h' }
+    { expiresIn: SESSION_TTL }
   );
 
   await AuditLog.create({

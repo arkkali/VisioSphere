@@ -12,6 +12,7 @@ const initSocket = require('./config/socket');
 const initCron = require('./config/cron');
 const errorHandler = require('./middleware/errorHandler');
 const { globalLimiter } = require('./config/rateLimiter');
+const { RENEWED_TOKEN_HEADER } = require('./config/session');
 require('./config/firebase');
 
 const app = express();
@@ -33,6 +34,10 @@ const corsOptions = {
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  // Browser JS cannot read a custom response header cross-origin unless it is
+  // exposed here. Without this the web app would silently never pick up a
+  // renewed session token while mobile, which is not subject to CORS, would.
+  exposedHeaders: [RENEWED_TOKEN_HEADER],
 };
 
 app.use(cors(corsOptions));

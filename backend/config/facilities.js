@@ -63,6 +63,21 @@ const FACILITIES = {
 
 const FACILITY_KEYS = Object.keys(FACILITIES);
 
+/**
+ * Every house at every facility, deduped.
+ *
+ * EXISTS SO THE MODELS DO NOT RETYPE THIS LIST. Nurse.houseAssigned and
+ * Resident.house are `enum`s, and both were written out by hand before Saint
+ * Anthony existed. When SAINT_ANTHONY was added here, those two enums were not
+ * updated — so 'House of Saint Anthony' was declared valid in this file and
+ * simultaneously rejected by Mongoose, and Saint Anthony staff and residents
+ * could not be saved with their own house at all. Deriving the enums from here
+ * makes that class of drift impossible: adding a facility above is now enough.
+ */
+const ALL_HOUSES = [
+  ...new Set(FACILITY_KEYS.flatMap((key) => FACILITIES[key].houses)),
+];
+
 /** Default for backfilled/legacy rows — all pre-existing data is Graces. */
 const DEFAULT_FACILITY = FACILITIES.GRACES.key;
 
@@ -239,6 +254,7 @@ const roomFor = (facility) => `facility:${facility}`;
 
 module.exports = {
   FACILITIES,
+  ALL_HOUSES,
   roomFor,
   FACILITY_KEYS,
   DEFAULT_FACILITY,

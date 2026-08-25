@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { isFacility } = require('../config/facilities');
+const { RENEWED_TOKEN_HEADER, renewedTokenFor } = require('../config/session');
 const { runWithFacility, runUnscoped } = require('../models/plugins/facilityScope');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -43,6 +44,23 @@ const verifyToken = (req, res, next) => {
   }
 
   req.facility = decoded.facility;
+
+  // Slide the session forward. A token nearing its expiry is replaced here, and
+  // the client swaps it in from the response header — so a user who keeps using
+  // the app never hits the expiry at all. See config/session.js for why this is
+  // preferred over simply issuing very long-lived tokens.
+  //
+  // Wrapped defensively: this is a convenience on the path of EVERY
+  // authenticated request. If signing ever throws, the request must still be
+  // served with the token the caller already presented and verified. A failure
+  // to renew is a future re-login, not a failed request now.
+  try {
+    const renewed = renewedTokenFor(decoded);
+    if (renewed) res.setHeader(RENEWED_TOKEN_HEADER, renewed);
+  } catch (err) {
+    console.warn('[session] token renewal failed:', err.message);
+  }
+
   return runWithFacility(decoded.facility, () => next());
 };
 
