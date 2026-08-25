@@ -1,5 +1,5 @@
 import React from 'react';
-import { housesForCurrentUser } from '../../constants/houses';
+import { housesForCurrentUser, hasHouseChoice } from '../../constants/houses';
 
 const AddNurseModal = ({ show, onClose, nurse, onChange, onSubmit, isSubmitting }) => {
   if (!show) return null;
@@ -67,18 +67,24 @@ const AddNurseModal = ({ show, onClose, nurse, onChange, onSubmit, isSubmitting 
             />
           </div>
 
-          <div className="mb-[10px]">
-            <label className="block mb-[8px] font-bold text-[#2E3A59] dark:text-slate-300 text-[0.85rem] uppercase tracking-[0.5px]">House Assignment *</label>
-            <select
-              value={nurse.houseAssigned}
-              onChange={(e) => onChange('houseAssigned', e.target.value)}
-              className="w-full p-[14px] bg-white dark:bg-slate-900 border border-[#A8A8A8] dark:border-slate-600 rounded-[8px] text-[0.95rem] font-medium text-[#00212e] dark:text-white focus:outline-none focus:border-[#00a8e8] dark:focus:border-[#38bdf8] focus:ring-[3px] focus:ring-[#00a8e8]/20 transition-all cursor-pointer appearance-none bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%2300212e%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%23ffffff%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] bg-no-repeat bg-[right_14px_center]"
-            >
-              {housesForCurrentUser().map((house) => (
-                <option key={house} value={house}>{house}</option>
-              ))}
-            </select>
-          </div>
+          {/* Grace's only. Saint Anthony is a single building, so this would
+              offer exactly one option and imply a decision that does not
+              exist. The sole house is still submitted — see the page's
+              emptyNurse()/emptyNewResident() default. */}
+          {hasHouseChoice() && (
+            <div className="mb-[10px]">
+              <label className="block mb-[8px] font-bold text-[#2E3A59] dark:text-slate-300 text-[0.85rem] uppercase tracking-[0.5px]">House Assignment *</label>
+              <select
+                value={nurse.houseAssigned}
+                onChange={(e) => onChange('houseAssigned', e.target.value)}
+                className="w-full p-[14px] bg-white dark:bg-slate-900 border border-[#A8A8A8] dark:border-slate-600 rounded-[8px] text-[0.95rem] font-medium text-[#00212e] dark:text-white focus:outline-none focus:border-[#00a8e8] dark:focus:border-[#38bdf8] focus:ring-[3px] focus:ring-[#00a8e8]/20 transition-all cursor-pointer appearance-none bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%2300212e%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%23ffffff%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] bg-no-repeat bg-[right_14px_center]"
+              >
+                {housesForCurrentUser().map((house) => (
+                  <option key={house} value={house}>{house}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-[16px] p-[24px] border-t border-[#E5E7EB] dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-900/50 rounded-b-[16px]">

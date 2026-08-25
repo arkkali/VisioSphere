@@ -10,8 +10,9 @@ import DebugPanel from '../components/cctv/DebugPanel';
 import { resolveAlertMeta } from '../components/cctv/alertMeta';
 import { dismissIncident, resolveIncident } from '../services/cctvService';
 import dashboardService from '../services/dashboardService';
-import { camerasForCurrentUser, withLiveStatus, activeCameraCount, totalCameraCount } from '../constants/cameras';
+import { camerasForCurrentUser, withLiveStatus, withStreamToken, activeCameraCount, totalCameraCount } from '../constants/cameras';
 import { useCameraHealth } from '../hooks/useCameraHealth';
+import { useStreamToken } from '../hooks/useStreamToken';
 import { useAlertSound } from '../hooks/useAlertSound';
 import { useAlerts } from '../context/AlertContext';
 
@@ -65,7 +66,15 @@ const CCTVAnalytics = () => {
   const baseCameras  = useMemo(() => camerasForCurrentUser(), []);
   // Active/Inactive is LIVE — polled from ai_core, not read off a constant.
   const health       = useCameraHealth();
-  const CAMERAS      = useMemo(() => withLiveStatus(baseCameras, health), [baseCameras, health]);
+  // Feed URLs carry a short-lived signed token minted by the authenticated
+  // backend. Until it arrives every url is null and the tiles read "No Signal" —
+  // the honest state, and the reason an unauthenticated visitor now sees no
+  // video here even if they somehow render the page.
+  const stream       = useStreamToken();
+  const CAMERAS      = useMemo(
+    () => withStreamToken(withLiveStatus(baseCameras, health), stream),
+    [baseCameras, health, stream]
+  );
   const activeCount  = useMemo(() => activeCameraCount(CAMERAS), [CAMERAS]);
   const totalCount   = useMemo(() => totalCameraCount(baseCameras), [baseCameras]);
 

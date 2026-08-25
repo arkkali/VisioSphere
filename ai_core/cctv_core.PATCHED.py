@@ -1115,22 +1115,6 @@ MOVEMENT_COOLDOWN_S      = 60.0
 # in process_camera_thread; the scorers themselves are untouched.
 AGITATION_MOTION_GATE_S  = 2.5
 
-# ── Where "hand near head" starts ────────────────────────────────────────────
-# The hands-on-head test used to count any wrist above the SHOULDER midpoint.
-# Your mouth is above your shoulders, so eating, drinking, wiping your mouth and
-# holding a cup all satisfied it — and two hands near the face scores 0.70 in a
-# single frame, well past AGITATION_THRESHOLD. That is the whole story behind
-# the repeated AGITATION alerts on one resident at the dining table.
-#
-# Distress puts the wrist on the scalp or temple — at or ABOVE the nose. Eating
-# puts it at the mouth or chin — BELOW the nose. Measured from the nose instead,
-# in shoulder-widths so it scales with distance from the camera.
-#
-# 0.00 = the wrist must be strictly above the nose. Raise toward 0.25 if eating
-# still leaks through. Negative values loosen it back toward the old behaviour.
-AGITATION_WRIST_ABOVE_NOSE = float(os.getenv("AGITATION_WRIST_ABOVE_NOSE", "0.0"))
-
-
 # Torso-angle band (degrees from vertical) that flags a stationary person as
 # being in a *concerning posture*. Below this they're sitting upright fine.
 # At/above FALL_ANGLE_THRESHOLD (65°) the FallStateMachine takes over and we
@@ -2399,12 +2383,7 @@ class BodyAgitationScorer:
         for wr_i in [9, 10]:           # left wrist=9, right wrist=10
             if float(kpts[wr_i][2]) >= HIGH_CONF:
                 wx, wy = xy(wr_i)
-                # Measured from the NOSE, not the shoulder line. A wrist at
-                # mouth or chin level is someone eating; a wrist above the nose
-                # is a hand on the scalp or temple. See
-                # AGITATION_WRIST_ABOVE_NOSE for the margin and how to tune it.
-                _head_bar = nose_y - AGITATION_WRIST_ABOVE_NOSE * shoulder_width
-                if wy < _head_bar and abs(wx - head_x) < shoulder_width * 1.0:
+                if wy < shoulder_mid_y and abs(wx - head_x) < shoulder_width * 1.0:
                     hands_on_head += 1
                     wrist_ys.append(wy)
 
@@ -4182,17 +4161,6 @@ def process_camera_thread(cam_id):
                         if float(kpts[wr_i][2]) >= 0.35:
                             wx, wy = int(kpts[wr_i][0]), int(kpts[wr_i][1])
                             cv2.circle(display, (wx, wy), 14, (180, 0, 200), 2)
-
-                # Colour the box and skeleton while the SCORE is high, not
-                # only on the one frame the alert fires. _evaluate_alert()
-                # returns "AGITATION_RISK" once and then resets its timer, so
-                # the block below set track_status for a single frame out of
-                # hundreds — which is why agitation clips never changed colour
-                # the way falls do. fall_status is a persisting state; the
-                # agitation score is the equivalent here.
-                if (body_agi_score > AGITATION_THRESHOLD
-                        and _priority("AGITATION_RISK") > _priority(track_status)):
-                    track_status = "AGITATION_RISK"
 
                 if body_alert:
                     print(f"[BODY AGI {cam_id} ID{tid}] 🔴 AGITATION_RISK — sending alert")

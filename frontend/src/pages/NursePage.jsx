@@ -6,7 +6,7 @@ import AssignDrawer from '../components/nurses/AssignDrawer';
 import AddNurseModal from '../components/nurses/AddNurseModal';
 import EditNurseModal from '../components/nurses/EditNurseModal';
 import DeleteNurseModal from '../components/nurses/DeleteNurseModal';
-import { housesForCurrentUser } from '../constants/houses';
+import { housesForCurrentUser, soleHouse } from '../constants/houses';
 
 
 const getFullName = (person) => {
@@ -164,7 +164,11 @@ const NursePage = () => {
       middleName: nurse.middleName || '',
       lastName: nurse.lastName,
       email: nurse.email || '',
-      houseAssigned: nurse.houseAssigned,
+      // Where there is no house choice, seed the facility's sole house rather
+      // than whatever is stored. The field is hidden, so a record holding
+      // another facility's house could otherwise never be corrected — saving
+      // would write the wrong value straight back.
+      houseAssigned: soleHouse() ?? nurse.houseAssigned,
       status: nurse.status || 'Active',
     });
     setShowEditModal(true);

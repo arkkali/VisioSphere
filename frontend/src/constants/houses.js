@@ -46,6 +46,36 @@ export const housesForCurrentUser = () => FACILITY_HOUSES[currentFacility()] || 
 
 export const housesFor = (facility) => FACILITY_HOUSES[facility] || [];
 
+/**
+ * Whether "house" is a meaningful choice at the signed-in user's facility.
+ *
+ * Houses are a Grace's concept: it is split across six of them, so which house
+ * a nurse or resident belongs to carries real information. Saint Anthony is a
+ * single building — every one of its staff and residents is in the same place,
+ * so a House column shows the same string on every row and a House dropdown
+ * offers exactly one option. Both are noise, and worse, the dropdown implies a
+ * decision that does not exist.
+ *
+ * Driven off the house count rather than a `=== 'GRACES'` check, so a second
+ * single-house facility gets the right behaviour for free, and Grace's would
+ * keep the column even if its house list changed.
+ */
+export const hasHouseChoice = () => housesForCurrentUser().length > 1;
+
+/**
+ * The house to use when there is no choice to offer, or null when the facility
+ * genuinely has several.
+ *
+ * Edit forms seed from the STORED value, which is exactly how a Saint Anthony
+ * nurse holding a Grace's house would keep it: the field is hidden, so nobody
+ * can correct it, and saving would write the wrong value straight back. Seeding
+ * from here instead makes every edit self-heal.
+ */
+export const soleHouse = () => {
+  const houses = housesForCurrentUser();
+  return houses.length === 1 ? houses[0] : null;
+};
+
 /** Which facility a house belongs to, or null if unrecognised. */
 export const facilityForHouse = (house) =>
   Object.keys(FACILITY_HOUSES).find((f) => FACILITY_HOUSES[f].includes(house)) || null;

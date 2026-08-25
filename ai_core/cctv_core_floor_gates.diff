@@ -1,0 +1,286 @@
+--- cctv_core.py.bak-20260824_230314	2026-08-24 23:00:30.148667471 +0000
++++ cctv_core.py	2026-08-24 23:03:14.803096524 +0000
+@@ -1290,7 +1290,14 @@
+ #     scenarios — just with 3 s of confirmation rather than instant firing.
+ # Fast falls (angle_rate >= FALL_RATE_THRESHOLD) bypass this timer entirely;
+ # emergencies must alert as fast as the FALL_FRAMES_REQUIRED window allows.
+-LYING_CONFIRM_SECONDS    = 3.0
++# 10s, not 3s. Three seconds is shorter than picking something up off the floor,
++# shorter than tying a shoe, shorter than wiping a spill — and a bend that
++# outlasts the window gets relabelled LYING DOWN. standing_bend() catches most
++# of those now, but it fails open whenever the legs are not visible, and this is
++# the cheap second line behind it. A resident who has genuinely gone down stays
++# down far longer than this, and a FAST fall skips the timer completely (see
++# _evaluate_alert), so nothing about an emergency is slowed by raising it.
++LYING_CONFIRM_SECONDS    = float(os.getenv("LYING_CONFIRM_SECONDS", "10.0"))
+ 
+ # ── Prolonged-fall re-alerting ───────────────────────────────────────────────
+ # A person still on the floor after ten minutes IS worse news than one who has
+@@ -1565,6 +1572,65 @@
+     os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                  "furniture_zones.json"))
+ FURNITURE_MODE  = os.getenv("FURNITURE_MODE", "all").strip().lower()
++
++# ── Floor allowlist — "on the floor" as positive evidence ────────────────────
++# The furniture zones above are a DENYLIST: a body is exonerated only where a
++# zone was drawn, so every undrawn square metre is treated as floor by default.
++# In a room with residents seated across the whole view, those undrawn gaps are
++# where the false LYING DOWN alerts come from.
++#
++# This inverts it. Draw ONE polygon per camera named "floor" (draw_zones.py,
++# then type `floor` when it asks for the zone name) covering the open floor a
++# body could actually land on. FALLEN may then only be declared when the support
++# point is inside that polygon.
++#
++# Fails OPEN: a camera with no floor polygon configured behaves exactly as it
++# does today, so this changes nothing until you draw one.
++FLOOR_ZONE_REQUIRED = os.getenv("FLOOR_ZONE_REQUIRED", "1") == "1"
++FLOOR_ZONE_NAMES    = {"floor", "ground", "open floor"}
++
++# ── Lower-body visibility gate ───────────────────────────────────────────────
++# standing_bend() fails open when it can see neither ankles nor knees, which is
++# right for a guard — a missing measurement must never suppress a fall. But that
++# is exactly the condition in the observed false alarms: a resident seated
++# behind other people, showing head, shoulders and maybe one hip. The torso
++# angle computed from that is noise, and nothing downstream can tell.
++#
++# So: if the half of the body that would be ON the floor cannot be seen, do not
++# declare a fall from the half that can. Both hips plus at least one knee.
++FALL_REQUIRE_LOWER_BODY = os.getenv("FALL_REQUIRE_LOWER_BODY", "1") == "1"
++
++# ── Minimum apparent size for fall geometry ──────────────────────────────────
++# Torso angle and aspect ratio are measured in pixels. On a body 50 px tall at
++# the back of the room, 3 px of keypoint jitter is a 15-20 degree swing in torso
++# angle — wider than the whole margin between "seated" and "fallen". Below this
++# fraction of frame height the geometry is not evidence. 0 disables.
++FALL_MIN_BBOX_H_FRAC = float(os.getenv("FALL_MIN_BBOX_H_FRAC", "0.15"))
++
++# ── Non-square pixels — the measurement error under every threshold ──────────
++# Every frame is force-resized to INFERENCE_W x INFERENCE_H. When the source does
++# not share that aspect ratio, x and y are scaled by DIFFERENT factors, and every
++# angle and every bbox ratio computed afterwards is wrong by that factor.
++#
++# A 1280x720 (16:9) camera squeezed into 720x480 (3:2) is scaled 0.5625 in x and
++# 0.6667 in y: bodies come out 18.5% taller than they are, and a torso truly at
++# 45 degrees measures 40. Thresholds tuned against the 3:2 test videos therefore
++# do not mean the same thing on the live camera — which is the sort of silent
++# error that makes tuning feel like guesswork.
++#
++# k = (source aspect) / (inference aspect). Multiply every x-difference by k and
++# the geometry is back in true proportions. k == 1 for a matching source, so this
++# changes nothing when there is nothing to correct. Set 0 to disable.
++PIXEL_ASPECT_CORRECT = os.getenv("PIXEL_ASPECT_CORRECT", "1") == "1"
++cam_pixel_k = {}          # cam_id -> k, measured once from the first real frame
++
++# Log falls suppressed by the gates above. Leave on for the first few days — it
++# is how you tell "the gates are working" from "the camera stopped seeing
++# anything". Throttled per track so a seated resident cannot fill the journal at
++# the inference frame rate.
++FLOOR_GATE_DEBUG       = os.getenv("FLOOR_GATE_DEBUG", "1") == "1"
++FLOOR_GATE_LOG_EVERY_S = float(os.getenv("FLOOR_GATE_LOG_EVERY_S", "10"))
++
+ FURNITURE_DEBUG = os.getenv("FURNITURE_DEBUG", "0") == "1"
+ 
+ _FURNITURE_ZONES = {}     # cam_id -> list of {"name": str, "pts": np.int32 (N,2)}
+@@ -1632,12 +1698,72 @@
+     if point is None:
+         return None
+     for z in _FURNITURE_ZONES.get(cam_id, ()):
++        # A 'floor' polygon is an allowlist, not a seat — it must never
++        # exonerate anybody as 'on furniture'.
++        if _is_floor_zone(z["name"]):
++            continue
+         if cv2.pointPolygonTest(z["pts"], (float(point[0]), float(point[1])),
+                                 False) >= 0:
+             return z["name"]
+     return None
+ 
+ 
++def _is_floor_zone(name):
++    return str(name).strip().lower() in FLOOR_ZONE_NAMES
++
++
++def camera_has_floor_zone(cam_id):
++    """True if a 'floor' polygon has been drawn for this camera."""
++    return any(_is_floor_zone(z["name"]) for z in _FURNITURE_ZONES.get(cam_id, ()))
++
++
++def in_floor_zone(cam_id, point):
++    """True if `point` is inside this camera's 'floor' polygon.
++
++    Fails OPEN — a camera with no floor polygon returns True — so drawing the
++    zone is what switches the gate on, one camera at a time.
++    """
++    zones = [z for z in _FURNITURE_ZONES.get(cam_id, ())
++             if _is_floor_zone(z["name"])]
++    if not zones:
++        return True
++    if point is None:
++        return True
++    for z in zones:
++        if cv2.pointPolygonTest(z["pts"],
++                                (float(point[0]), float(point[1])),
++                                False) >= 0:
++            return True
++    return False
++
++
++def lower_body_visible(kpts):
++    """Both hips and at least one knee detected above POSE_CONF_THRESHOLD."""
++    if kpts is None:
++        return False
++    hips = (point_conf(kpts[LEFT_HIP])  >= POSE_CONF_THRESHOLD and
++            point_conf(kpts[RIGHT_HIP]) >= POSE_CONF_THRESHOLD)
++    knee = (point_conf(kpts[LEFT_KNEE])  >= POSE_CONF_THRESHOLD or
++            point_conf(kpts[RIGHT_KNEE]) >= POSE_CONF_THRESHOLD)
++    return bool(hips and knee)
++
++
++def pixel_k(cam_id):
++    """x-scale correction for this camera. 1.0 = square pixels, nothing to fix."""
++    return cam_pixel_k.get(cam_id, 1.0) if PIXEL_ASPECT_CORRECT else 1.0
++
++
++def correct_angle(deg, k):
++    """Re-measure an angle-from-vertical in true proportions.
++
++    tan(true) = k * tan(measured), evaluated with atan2 so 90 degrees is safe.
++    """
++    if k == 1.0 or deg is None:
++        return deg
++    r = math.radians(deg)
++    return math.degrees(math.atan2(k * math.sin(r), math.cos(r)))
++
++
+ def support_point(kpts, box):
+     """Best estimate of where the body's weight is resting, in pixels.
+ 
+@@ -1801,7 +1927,7 @@
+     return (torso_len / shoulder_w) >= POSE_MIN_TORSO_RATIO
+ 
+ 
+-def standing_bend(kpts):
++def standing_bend(kpts, k=1.0):
+     """True when the legs are still extended below the hips — bent over, but
+     standing on their feet. False when unmeasurable (fail open: never let a
+     missing measurement suppress a fall).
+@@ -1836,7 +1962,12 @@
+             return False
+     sh_mid  = midpoint(kpts[LEFT_SHOULDER][:2], kpts[RIGHT_SHOULDER][:2])
+     hip_mid = midpoint(kpts[LEFT_HIP][:2],      kpts[RIGHT_HIP][:2])
+-    torso_len = math.hypot(sh_mid[0] - hip_mid[0], sh_mid[1] - hip_mid[1])
++    # x and y are not the same scale after the resize — see
++    # PIXEL_ASPECT_CORRECT. The drops below are pure-y and unaffected,
++    # but this length mixes both axes, so it needs the correction or
++    # the ratios shift against the thresholds measured above.
++    torso_len = math.hypot((sh_mid[0] - hip_mid[0]) * k,
++                           sh_mid[1] - hip_mid[1])
+     if torso_len < 1e-3:
+         return False
+     ankles = [kpts[i] for i in (LEFT_ANKLE, RIGHT_ANKLE)
+@@ -2524,7 +2655,8 @@
+     def update(self, angle, aspect_ratio, has_kpts, now, bbox_h=0,
+                posture=(None, None), seated=False, seated_deep=False,
+                furniture=None, center_y=None, extent_ratio=None,
+-               bend=False):
++               bend=False,
++               on_floor=True, lower_body=True):
+         """
+         angle:        torso angle from vertical (degrees)
+         aspect_ratio: bbox height / width
+@@ -2678,6 +2810,36 @@
+         path_a = (angle > FALL_ANGLE_THRESHOLD and aspect_ratio < 1.3
+                   and not bend)
+ 
++        # ── Positive-evidence gates for a NEW fall ───────────────────────
++        # The paths above say "this shape could be horizontal", and
++        # standing_bend() already removes the person who is bent over but still
++        # on their feet. These ask what none of them can:
++        #   is the body over the floor at all,
++        #   can we see the half of it that would be on the floor,
++        #   is it big enough in pixels for any of this to mean anything.
++        #
++        # They only ever PREVENT a fall. None may undo an established FALLEN —
++        # clearing that state mid-confirmation restarts the timer and the real
++        # alert never completes. Same reason the seated guard doesn't.
++        if self._state != self.FALLEN:
++            _gate = None
++            if FLOOR_ZONE_REQUIRED and not on_floor:
++                _gate = "support point outside the floor zone"
++            elif FALL_REQUIRE_LOWER_BODY and not lower_body:
++                _gate = "hips/knees not visible - cannot see the lower body"
++            elif (FALL_MIN_BBOX_H_FRAC > 0 and bbox_h > 0
++                  and bbox_h < FALL_MIN_BBOX_H_FRAC * INFERENCE_H):
++                _gate = "body only %dpx tall - too far for fall geometry" % int(bbox_h)
++            if _gate is not None:
++                if FLOOR_GATE_DEBUG and (
++                        now - getattr(self, "_gate_logged_at", 0.0)
++                        >= FLOOR_GATE_LOG_EVERY_S):
++                    self._gate_logged_at = now
++                    print("[FALL SM] gate: FALLEN suppressed - " + _gate)
++                self._candidate = self.NORMAL
++                self._candidate_count = 0
++                return self._state, None
++
+         on_furniture = furniture is not None
+         if on_furniture and FURNITURE_MODE == "all" and self._state != self.FALLEN:
+             raw = self.NORMAL
+@@ -3422,6 +3584,19 @@
+         # and INFERENCE_H=720 in ai_core/.env) for noticeably better keypoint
+         # precision at distance, with no FPS loss. Bumping past 720p gives
+         # diminishing returns because the model's internal stride is 32.
++        # Measure the x/y scale mismatch this resize introduces, once.
++        # Everything downstream measures angles and ratios in these pixels.
++        if cam_id not in cam_pixel_k:
++            _sh, _sw = frame.shape[:2]
++            _k = ((_sw / max(_sh, 1)) / (INFERENCE_W / float(INFERENCE_H))
++                  if PIXEL_ASPECT_CORRECT else 1.0)
++            cam_pixel_k[cam_id] = _k
++            print(f"[GEOM {cam_id}] source {_sw}x{_sh} -> "
++                  f"{INFERENCE_W}x{INFERENCE_H}, x-correction k={_k:.3f}"
++                  + ("  (square pixels, nothing to correct)"
++                     if abs(_k - 1.0) < 0.02 else
++                     "  (angles and aspect ratios were distorted by this "
++                     "factor - now corrected)"))
+         frame = cv2.resize(frame, (INFERENCE_W, INFERENCE_H))
+         with raw_lock:
+             raw_frames[cam_id] = (frame, capture_ts)
+@@ -3833,8 +4008,9 @@
+             # or open an incident clip.
+             has_kpts  = (pose_has_required_keypoints(kpts)
+                          and pose_is_plausible(kpts))
+-            angle     = get_torso_angle(kpts) if has_kpts else 0.0
+-            aspect    = get_body_aspect_ratio((x1, y1, x2, y2))
++            _k        = pixel_k(cam_id)
++            angle     = correct_angle(get_torso_angle(kpts), _k) if has_kpts else 0.0
++            aspect    = get_body_aspect_ratio((x1, y1, x2, y2)) / _k
+             # Movement signal uses BBOX centroid, not torso keypoints.
+             # YOLO-pose jitters keypoints by 2–5 px even on a perfectly
+             # still subject; that jitter spikes per-frame velocity past
+@@ -3878,6 +4054,8 @@
+             # is the test point — that is what a seat actually supports.
+             _support = support_point(kpts if has_kpts else None, (x1, y1, x2, y2))
+             _furniture = furniture_zone_at(cam_id, _support)
++            _on_floor = in_floor_zone(cam_id, _support)
++            _lower_ok = lower_body_visible(kpts if has_kpts else None)
+             if _furniture and OVERLAY_DEBUG_TEXT:
+                 cv2.circle(display, (int(_support[0]), int(_support[1])),
+                            3, (160, 160, 255), -1)
+@@ -3887,7 +4065,7 @@
+ 
+             # Bent over but still on their feet — see standing_bend(). Gates
+             # Path A only, so a genuine fall is unaffected.
+-            _bend = standing_bend(kpts) if has_kpts else False
++            _bend = standing_bend(kpts, _k) if has_kpts else False
+             if _bend and angle > FALL_ANGLE_THRESHOLD and OVERLAY_DEBUG_TEXT:
+                 cv2.putText(display, "BENDING (on feet)", (x1, y1 - 24),
+                             cv2.FONT_HERSHEY_SIMPLEX, _dbg_font,
+@@ -3898,6 +4076,8 @@
+                                                      seated=_seated,
+                                                      seated_deep=_seated_deep,
+                                                      furniture=_furniture,
++                                                     on_floor=_on_floor,
++                                                     lower_body=_lower_ok,
+                                                      center_y=(y1 + y2) / 2.0,
+                                                      extent_ratio=body_extent_ratio(
+                                                          kpts if has_kpts else None,

@@ -1,10 +1,20 @@
 import { currentFacility } from './houses';
 
 const STREAM_BASE_URL = import.meta.env.VITE_STREAM_URL || 'http://localhost:5001/video_feed';
-// Shared secret matching STREAM_TOKEN in ai_core/.env. Appended as ?key= so the
-// public Cloudflare Tunnel feed isn't open to anonymous viewers. Empty = no token.
-const STREAM_TOKEN = import.meta.env.VITE_STREAM_TOKEN || '';
-const feed = (cam) => `${STREAM_BASE_URL}/${cam}${STREAM_TOKEN ? `?key=${STREAM_TOKEN}` : ''}`;
+
+/**
+ * The UNAUTHENTICATED feed path for a camera. Not playable on its own.
+ *
+ * This used to append `?key=${VITE_STREAM_TOKEN}` — a single static secret.
+ * Vite inlines every VITE_* variable into the built bundle, so that secret was
+ * public: anyone could read it out of the JavaScript and stream a camera
+ * straight from ai_core without signing in, bypassing this app entirely.
+ *
+ * Authorisation now comes from a short-lived signed token minted per session by
+ * the authenticated backend (see hooks/useStreamToken.js) and attached by
+ * withStreamToken() below.
+ */
+const feed = (cam) => `${STREAM_BASE_URL}/${cam}`;
 
 /**
  * Cameras per facility — now FULLY separated.
@@ -123,6 +133,24 @@ export const withLiveStatus = (cams, health) =>
     status: c.feedId && health?.get?.(c.feedId) ? 'Active' : 'Inactive',
     lastFrameAgo: c.feedId ? health?.getAge?.(c.feedId) ?? null : null,
   }));
+
+/**
+ * Attach a signed viewing token to every camera that has a feed.
+ *
+ * `stream` is what useStreamToken() returns, or null before one has arrived.
+ * With no token the url is deliberately left null — a tile with no playable URL
+ * renders "No Signal", which is the honest state. Guessing a URL without
+ * authorisation would just produce a 403 from ai_core and a broken image.
+ */
+export const withStreamToken = (cams, stream) =>
+  cams.map((c) => {
+    if (!c.url || !stream?.token) return { ...c, url: null };
+    // Prefer the base the backend reported; it knows the public tunnel URL.
+    const url = stream.streamBase
+      ? c.url.replace(STREAM_BASE_URL, stream.streamBase)
+      : c.url;
+    return { ...c, url: `${url}?token=${encodeURIComponent(stream.token)}` };
+  });
 
 export const activeCameraCount = (cams = []) =>
   cams.filter((c) => c.status === 'Active').length;

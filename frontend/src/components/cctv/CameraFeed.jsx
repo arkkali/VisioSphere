@@ -7,7 +7,10 @@ const CameraFeed = ({
 }) => {
   return (
     <div className="w-full h-full relative flex items-center justify-center bg-black">
-      {camera?.type === 'stream' ? (
+      {/* `camera.url` is null until a signed stream token arrives (and stays
+          null for cameras with no feed), so it is checked here — otherwise
+          this renders <img src={null}> and shows a broken image. */}
+      {camera?.type === 'stream' && camera?.url ? (
         <img
           src={camera.url}
           alt={camera.name}

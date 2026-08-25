@@ -13,7 +13,7 @@ import DeleteResidentModal from '../components/elders/DeleteResidentModal';
 import ImportPreviewModal from '../components/elders/ImportPreviewModal';
 import ReportModal from '../components/elders/ReportModal';
 import ArchiveModal from '../components/elders/ArchiveModal';
-import { housesForCurrentUser } from '../constants/houses';
+import { housesForCurrentUser, soleHouse } from '../constants/houses';
 import {
   getAllResidents,
   updateResident,
@@ -263,7 +263,9 @@ const EldersDashboard = () => {
       firstName: resident.firstName,
       middleName: resident.middleName || '',
       lastName: resident.lastName,
-      house: resident.house,
+      // See NursePage: with the field hidden, seeding from the stored value
+      // would make a wrong house permanent.
+      house: soleHouse() ?? resident.house,
     });
     setShowEditModal(true);
   };

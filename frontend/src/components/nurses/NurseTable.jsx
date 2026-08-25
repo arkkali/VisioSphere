@@ -1,4 +1,5 @@
 import React from 'react';
+import { hasHouseChoice } from '../../constants/houses';
 
 const getFullName = (person) => {
   if (!person) return 'Unknown';
@@ -20,6 +21,9 @@ const NurseTable = ({
   filteredTotal,
   onPageChange,
 }) => {
+  // Resolved once per render: the facility cannot change without a fresh login.
+  const showHouse = hasHouseChoice();
+
   return (
     <div className="bg-white dark:bg-slate-800 rounded-[12px] shadow-sm border border-[#E5E7EB] dark:border-slate-700 overflow-hidden transition-colors duration-300">
       <div className="overflow-x-auto">
@@ -36,7 +40,11 @@ const NurseTable = ({
               </th>
               <th className="p-[16px_12px] text-left font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Nurse ID</th>
               <th className="p-[16px_12px] text-left font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Name</th>
-              <th className="p-[16px_12px] text-left font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">House Assigned</th>
+              {/* Grace's only — see hasHouseChoice(). Saint Anthony is one building,
+                  so this column would repeat the same value on every row. */}
+              {showHouse && (
+                <th className="p-[16px_12px] text-left font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">House Assigned</th>
+              )}
               <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Elders Assigned</th>
               <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Setup Status</th>
               <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Account Status</th>
@@ -45,9 +53,9 @@ const NurseTable = ({
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan="8" className="text-center p-[60px] text-[#A8A8A8] dark:text-slate-500 font-medium text-[1rem]">Loading medical staff...</td></tr>
+              <tr><td colSpan={showHouse ? 8 : 7} className="text-center p-[60px] text-[#A8A8A8] dark:text-slate-500 font-medium text-[1rem]">Loading medical staff...</td></tr>
             ) : currentNurses.length === 0 ? (
-              <tr><td colSpan="8" className="text-center p-[60px] text-[#A8A8A8] dark:text-slate-500 font-medium text-[1rem]">No records found.</td></tr>
+              <tr><td colSpan={showHouse ? 8 : 7} className="text-center p-[60px] text-[#A8A8A8] dark:text-slate-500 font-medium text-[1rem]">No records found.</td></tr>
             ) : (
               currentNurses.map((nurse) => (
                 <tr key={nurse.nurseId} className="border-b border-[#F8FAFC] dark:border-slate-700 transition-colors duration-200 hover:bg-[#e1f5fe]/30 dark:hover:bg-slate-700/50">
@@ -66,9 +74,11 @@ const NurseTable = ({
                     <span className="font-bold text-[#00212e] dark:text-white text-[0.95rem] block">{getFullName(nurse)}</span>
                     <span className="text-[#4A4A4A] dark:text-slate-400 text-[0.75rem] font-medium">{nurse.email}</span>
                   </td>
-                  <td className="p-[16px_12px] align-middle font-semibold text-[#2E3A59] dark:text-slate-300">
-                    {nurse.houseAssigned?.replace('House of ', '') || 'Unassigned'}
-                  </td>
+                  {showHouse && (
+                    <td className="p-[16px_12px] align-middle font-semibold text-[#2E3A59] dark:text-slate-300">
+                      {nurse.houseAssigned?.replace('House of ', '') || 'Unassigned'}
+                    </td>
+                  )}
                   <td className="p-[16px_12px] align-middle text-center">
                     {(!nurse.assignedElders || nurse.assignedElders.length === 0) ? (
                       <span className="inline-block p-[4px_10px] bg-[#f1f5f9] dark:bg-slate-700 text-[#64748b] dark:text-slate-300 rounded-[6px] text-[0.75rem] font-bold tracking-[0.5px]">None</span>
