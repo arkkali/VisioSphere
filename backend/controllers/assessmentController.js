@@ -39,6 +39,16 @@ async function updateAssessment(req, res, next) {
   }
 }
 
+async function deleteAssessment(req, res, next) {
+  try {
+    const io = req.app.get('io');
+    await assessmentService.deleteAssessment(req.params.id, req.user, io);
+    res.status(200).json({ message: 'Assessment deleted successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getAssessmentsByResident(req, res, next) {
   try {
     const assessments = await assessmentService.getAssessmentsByResident(req.params.residentId);
@@ -87,6 +97,7 @@ module.exports = {
   uploadFile,
   createAssessment,
   updateAssessment,
+  deleteAssessment,
   getAssessmentsByResident,
   getAssessmentById,
   addComment,

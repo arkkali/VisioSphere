@@ -186,6 +186,32 @@ const assessment = await DailyAssessment.findByIdAndUpdate(
   return assessment;
 }
 
+async function deleteAssessment(id, actor = {}, io) {
+  const assessment = await DailyAssessment.findByIdAndDelete(id);
+  if (!assessment) {
+    const err = new Error('Assessment not found');
+    err.status = 404;
+    throw err;
+  }
+
+  await AuditLog.create({
+    category: 'Reporting',
+    event: 'Daily Report Deleted',
+    actorName: actor.name || actor.email || 'System User',
+    purpose: `Deleted daily assessment for ${assessment.residentName}`,
+    status: 'success',
+    oldValues: {
+      assessmentId: assessment._id,
+      residentId: assessment.residentId,
+      title: assessment.title,
+      tags: assessment.tags
+    },
+    newValues: null
+  });
+
+  if (io) io.emit('assessment_deleted', { assessmentId: assessment._id });
+}
+
 async function getAssessmentsByResident(residentId) {
   const list = await DailyAssessment.find({ residentId })
     .sort({ createdAt: -1 })
@@ -292,6 +318,7 @@ module.exports = {
   uploadFile,
   createAssessment,
   updateAssessment,
+  deleteAssessment,
   getAssessmentsByResident,
   getAssessmentById,
   addComment,
