@@ -19,7 +19,6 @@ import AssessmentEditor from '../components/assessments/AssessmentEditor';
 import DeleteAssessmentDialog from '../components/assessments/DeleteAssessmentDialog';
 import {
   fetchAllResidents,
-  fetchResidentsByNurse,
   fetchAssessments,
   createAssessment,
   updateAssessment,
@@ -99,7 +98,7 @@ const DailyAssessments = () => {
               .filter(Boolean)
               .join(' ') || 'Nurse';
             setActiveUser({ id: nurseProfile.nurseId, name: nName });
-            setResidents(await fetchResidentsByNurse(nurseProfile.nurseId));
+            setResidents(await fetchAllResidents());
           } else {
             setResidents([]);
           }
