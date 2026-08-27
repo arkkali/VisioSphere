@@ -27,6 +27,10 @@ import {
 } from '../services/assessmentService';
 import axiosInstance from '../api/axiosInstance';
 
+const nurseDisplayName = (nurse) => nurse?.displayName?.trim()
+  || [nurse?.firstName, nurse?.lastName].filter(Boolean).join(' ')
+  || 'Nurse';
+
 const DailyAssessments = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark' || (theme === 'default' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -94,9 +98,7 @@ const DailyAssessments = () => {
         if (isNurseView) {
           const nurseProfile = await resolveNurseProfile();
           if (nurseProfile?.nurseId) {
-            const nName = [nurseProfile.firstName, nurseProfile.lastName]
-              .filter(Boolean)
-              .join(' ') || 'Nurse';
+            const nName = nurseDisplayName(nurseProfile);
             setActiveUser({ id: nurseProfile.nurseId, name: nName });
             setResidents(await fetchAllResidents());
           } else {

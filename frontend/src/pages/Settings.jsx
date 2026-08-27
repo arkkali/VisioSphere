@@ -26,6 +26,7 @@ import {
 const getAdminId = () => localStorage.getItem('adminId') || '';
 
 const formatPersonName = (person) => {
+  if (person?.displayName?.trim()) return person.displayName.trim();
   const firstName = person?.firstName?.trim() || '';
   const lastName = person?.lastName?.trim() || '';
   return firstName && firstName.toLowerCase() === lastName.toLowerCase()

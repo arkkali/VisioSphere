@@ -24,6 +24,10 @@ const facilityFromToken = (token) => {
   }
 };
 
+const nurseDisplayName = (nurse) => nurse.displayName?.trim()
+  || `${nurse.firstName || ''} ${nurse.lastName || ''}`.trim()
+  || 'Nurse';
+
 const UserIcon = () => (
   <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -239,7 +243,7 @@ const Login = () => {
         userTheme = userData.theme || 'default';
 
         if (isNursePath) {
-          userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Nurse';
+          userName = nurseDisplayName(userData);
           userRole = 'Nurse';
           userId = userData.nurseId || loginId;
           
@@ -363,7 +367,7 @@ const Login = () => {
         let userId = '';
 
         if (isNursePath) {
-          userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Nurse';
+          userName = nurseDisplayName(userData);
           userRole = 'Nurse';
           userId = userData.nurseId || loginId;
 
