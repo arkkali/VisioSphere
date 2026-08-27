@@ -66,10 +66,23 @@ const BlockEditor = ({ block, isDark, onUpdate, onFileUploaded, onToast }) => {
     if (!file) return;
     try {
       const data = await uploadFile(file);
-      onFileUploaded(block.id, `${import.meta.env.VITE_API_URL.replace('/api', '')}${data.fileUrl}`);
+      // WHAT WAS WRONG HERE: the API origin was prepended to a value that was
+      // ALREADY an absolute URL, producing
+      //   https://api.example.comhttps://bucket.s3.../file.png
+      // which no browser can load. That alone is why an uploaded image never
+      // appeared, independently of anything on the storage side.
+      //
+      // The server now returns two things: `fileUrl` is the bare stored name,
+      // which is what belongs in the database, and `viewUrl` is a signed,
+      // short-lived link used only to show the file right now. Neither is
+      // built by string-concatenation in the browser.
+      onFileUploaded(block.id, data.fileUrl, data.viewUrl);
       onToast('File uploaded successfully');
-    } catch {
-      onToast('File upload failed', 'error');
+    } catch (err) {
+      // Show what the server actually said. "Upload failed" with no cause is
+      // what turned a misconfigured bucket into an afternoon of guessing.
+      const reason = err?.response?.data?.message || err?.message || '';
+      onToast(reason ? `Upload failed — ${reason}` : 'File upload failed', 'error');
     }
   };
 
@@ -228,12 +241,12 @@ const BlockEditor = ({ block, isDark, onUpdate, onFileUploaded, onToast }) => {
     case 'file':
       return (
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', p: 5, backgroundColor: isDark ? '#0f172a' : '#f8fafc', border: `2px dashed ${isDark ? '#334155' : '#cbd5e1'}`, borderRadius: 3, '&:hover': { borderColor: '#00a8e8' }, transition: 'all 0.2s' }}>
-          {block.fileUrl ? (
+          {(block.previewUrl || block.fileUrl) ? (
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
               {block.type === 'image' ? (
-                <Box component="img" src={block.fileUrl} alt="Upload preview" sx={{ maxWidth: '100%', maxHeight: '400px', borderRadius: 2, boxShadow: 3 }} />
+                <Box component="img" src={block.previewUrl || block.fileUrl} alt="Upload preview" sx={{ maxWidth: '100%', maxHeight: '400px', borderRadius: 2, boxShadow: 3 }} />
               ) : (
-                <Button variant="contained" href={block.fileUrl} target="_blank" rel="noreferrer" sx={{ bgcolor: '#00a8e8', color: '#fff', '&:hover': { bgcolor: '#0088b8' } }}>
+                <Button variant="contained" href={block.previewUrl || block.fileUrl} target="_blank" rel="noreferrer" sx={{ bgcolor: '#00a8e8', color: '#fff', '&:hover': { bgcolor: '#0088b8' } }}>
                   View Uploaded File
                 </Button>
               )}

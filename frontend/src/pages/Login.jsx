@@ -68,6 +68,14 @@ const Login = () => {
   const [loginId, setLoginId] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
+
+  // Which credential fields the user has actually visited. The Login button is
+  // disabled while either is empty, which left people staring at a dead button
+  // with nothing telling them why. Messages appear only after a field has been
+  // focused and left, so the form does not shout at someone who simply has not
+  // started typing.
+  const [touched, setTouched] = useState({ id: false, password: false });
+  const markTouched = (field) => setTouched((t) => ({ ...t, [field]: true }));
   const [rememberMe, setRememberMe] = useState(false);
   
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -751,11 +759,17 @@ const Login = () => {
                           placeholder="Enter credentials"
                           value={loginId}
                           onChange={(e) => setLoginId(e.target.value)}
+                          onBlur={() => markTouched('id')}
                           disabled={loading || lockoutTimer > 0}
                           required 
                         />
                       </div>
                     </div>
+                      {touched.id && !loginId && (
+                        <p role="alert" className="mt-[8px] text-[12px] font-bold text-[#dc2626]">
+                          Email or Employee ID is required.
+                        </p>
+                      )}
                     
                     <div className="mb-[20px] text-left group relative">
                       <label className="block mb-[10px] text-[#475569] font-bold text-[12px] tracking-[0.08em] uppercase transition-colors group-focus-within:text-primary-blue">Password</label>
@@ -770,6 +784,7 @@ const Login = () => {
                           placeholder="Enter password"
                           value={loginPassword}
                           onChange={(e) => setLoginPassword(e.target.value)}
+                          onBlur={() => markTouched('password')}
                           disabled={loading || lockoutTimer > 0}
                           required 
                         />
@@ -788,6 +803,11 @@ const Login = () => {
                         </button>
                       </div>
                     </div>
+                      {touched.password && !loginPassword && (
+                        <p role="alert" className="mt-[8px] text-[12px] font-bold text-[#dc2626]">
+                          Password is required.
+                        </p>
+                      )}
 
                     <div className="flex items-center justify-between mb-[30px] group">
                       <FormControlLabel
@@ -815,6 +835,11 @@ const Login = () => {
                       />
                     </div>
                     
+                    {(!loginId || !loginPassword) && lockoutTimer === 0 && !loading && (
+                      <p className="mb-[12px] text-[13px] font-semibold text-[#64748b] text-center">
+                        Complete both required fields to enable Login.
+                      </p>
+                    )}
                     <button 
                       type="submit" 
                       className="w-full p-[16px] bg-gradient-to-r from-primary-blue to-[#0089bd] text-white border-none rounded-xl text-[16px] font-bold tracking-wide transition-all duration-300 hover:not(:disabled):to-[#0075a2] hover:not(:disabled):-translate-y-[2px] hover:not(:disabled):shadow-[0_10px_25px_rgba(0,168,232,0.4)] active:not(:disabled):scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed shadow-[0_4px_14px_rgba(0,168,232,0.25)] relative overflow-hidden group" 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import Sidebar from '../components/Sidebar';
@@ -178,21 +178,43 @@ const DailyAssessments = () => {
     );
   };
 
+  // Block ids exist only in the browser: handleSave strips them before the
+  // payload goes to the API, so anything loaded back from Mongo arrives with
+  // NO id at all. Every helper below matches blocks by id, and
+  // `undefined !== undefined` is false — so removeBlock(undefined) filtered
+  // out EVERY block, and updateBlock wrote the same edit into all of them.
+  // withBlockIds() re-attaches a stable id on load; nextBlockId() replaces
+  // Date.now(), which collides when two blocks are added in the same
+  // millisecond and produces two React children with the same key.
+  const blockIdRef = useRef(0);
+  const nextBlockId = () => `b-${Date.now().toString(36)}-${++blockIdRef.current}`;
+  const withBlockIds = (list = []) =>
+    list.map((b) => (b && b.id != null ? b : { ...b, id: nextBlockId() }));
+
   const addBlock = (type) => {
-    const newBlock = { id: Date.now(), type, content: '', fileUrl: null };
+    const newBlock = { id: nextBlockId(), type, content: '', fileUrl: null };
     if (type === 'checklist') newBlock.content = [{ text: '', checked: false }];
     if (type === 'chart') newBlock.content = { chartType: 'temperature', chartTitle: 'Temperature Tracking', dataPoints: [{ label: '', value: 0 }] };
     setBlocks((prev) => [...prev, newBlock]);
   };
 
-  const removeBlock = (id) => setBlocks((prev) => prev.filter((b) => b.id !== id));
+  // The `id == null` guard is belt and braces: if a block ever reaches here
+  // without an id again, it is kept rather than silently deleted.
+  const removeBlock = (id) =>
+    setBlocks((prev) => prev.filter((b) => b.id == null || b.id !== id));
 
   const updateBlock = (id, field, value) => {
+    if (id == null) return;
     setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, [field]: value } : b)));
   };
 
-  const handleBlockFileUploaded = (id, url) => {
-    setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, fileUrl: url } : b)));
+  // `name` is the stored filename and is what gets saved; `previewUrl` is a
+  // signed link used only to display the file in this editing session and is
+  // deliberately dropped by handleSave.
+  const handleBlockFileUploaded = (id, name, previewUrl) => {
+    if (id == null) return;
+    setBlocks((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, fileUrl: name, previewUrl } : b)));
   };
 
   const cancelCreating = () => {
@@ -206,7 +228,7 @@ const DailyAssessments = () => {
   const handleEditClick = (assessment) => {
     setReportTitle(assessment.title || '');
     setReportTags(assessment.tags || []);
-    setBlocks(assessment.blocks || []);
+    setBlocks(withBlockIds(assessment.blocks));
     setEditingId(assessment._id);
     setIsCreating(true);
     setExpandedAssessmentIds([]);
@@ -232,7 +254,15 @@ const DailyAssessments = () => {
       authorName: activeUser.name,
       title: reportTitle,
       tags: reportTags,
-      blocks: blocks.map(({ type, content, fileUrl }) => ({ type, content, fileUrl })),
+      // fileName is present on blocks that came back from the API, where
+      // fileUrl has been swapped for a short-lived signed link. Saving that
+      // link would store a URL that expires within the hour; the bare name is
+      // the durable thing.
+      blocks: blocks.map((b) => ({
+        type: b.type,
+        content: b.content,
+        fileUrl: b.fileName || b.fileUrl,
+      })),
     };
 
     try {
