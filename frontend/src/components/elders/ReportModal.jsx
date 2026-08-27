@@ -53,8 +53,13 @@ const ReportModal = ({ barData, overallPercentage, isDark, isSavingReport, onSav
                   xAxis={[{
                     data: barData.xAxis,
                     scaleType: 'band',
-                    tickLabelStyle: { angle: -30, textAnchor: 'end', fontSize: 11 },
+                    tickLabelStyle: { angle: -30, textAnchor: 'end', fontSize: 11, fill: isDark ? '#94a3b8' : '#64748b' },
                   }]}
+                  slotProps={{
+                    legend: {
+                      labelStyle: { fill: isDark ? '#cbd5e1' : '#334155' },
+                    },
+                  }}
                   margin={{ top: 20, bottom: 60, left: 40, right: 10 }}
                   sx={{
                     // Catch-all first: MUI renames its legend/axis classes
@@ -68,7 +73,7 @@ const ReportModal = ({ barData, overallPercentage, isDark, isSavingReport, onSav
                     '& .MuiChartsAxis-line': { stroke: isDark ? '#475569 !important' : '#cbd5e1 !important' },
                     '& .MuiChartsAxis-tick': { stroke: isDark ? '#475569 !important' : '#cbd5e1 !important' },
                     '& .MuiChartsLegend-mark': { rx: 4, ry: 4 },
-                    '& .MuiChartsLegend-label': { fill: isDark ? '#cbd5e1 !important' : '#334155 !important' },
+                    '& .MuiChartsLegend-label': { fill: isDark ? '#cbd5e1 !important' : '#334155 !important', color: isDark ? '#cbd5e1 !important' : '#334155 !important' },
                   }}
                 />
               </div>
@@ -85,7 +90,7 @@ const ReportModal = ({ barData, overallPercentage, isDark, isSavingReport, onSav
                   sx={{
                     [`& .${gaugeClasses.valueArc}`]: { fill: isDark ? '#38bdf8' : '#00a8e8' },
                     [`& .${gaugeClasses.referenceArc}`]: { fill: isDark ? '#334155' : '#e1f5fe' },
-                    [`& .${gaugeClasses.valueText}`]: { fill: isDark ? '#fff' : '#00212e', fontSize: '2.5rem', fontWeight: 800 },
+                    [`& .${gaugeClasses.valueText}`]: { fill: isDark ? '#fff !important' : '#00212e !important', color: isDark ? '#fff !important' : '#00212e !important', fontSize: '2.5rem', fontWeight: 800 },
                   }}
                 />
               </div>

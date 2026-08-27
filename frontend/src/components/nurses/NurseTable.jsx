@@ -99,13 +99,13 @@ const NurseTable = ({
                   </td>
                   <td className="p-[16px_12px] align-middle text-center">
                     <select
-                      className={`appearance-none font-bold text-[0.75rem] text-center tracking-[0.3px] uppercase p-[6px_12px] rounded-[6px] border cursor-pointer outline-none transition-colors ${nurse.status === 'Active' ? 'bg-[#f0fdf4] dark:bg-emerald-950/30 text-[#059669] dark:text-emerald-400 border-[#bbf7d0] dark:border-emerald-900/50' : nurse.status === 'Inactive' ? 'bg-[#fff1f2] dark:bg-rose-950/30 text-[#e11d48] dark:text-rose-400 border-[#fecdd3] dark:border-rose-900/50' : 'bg-[#fffbeb] dark:bg-amber-950/30 text-[#d97706] dark:text-amber-500 border-[#fde68a] dark:border-amber-700/50'}`}
+                      className={`appearance-none dark:[color-scheme:dark] font-bold text-[0.75rem] text-center tracking-[0.3px] uppercase p-[6px_12px] rounded-[6px] border cursor-pointer outline-none transition-colors ${nurse.status === 'Active' ? 'bg-[#f0fdf4] dark:bg-emerald-950/30 text-[#059669] dark:text-emerald-400 border-[#bbf7d0] dark:border-emerald-900/50' : nurse.status === 'Inactive' ? 'bg-[#fff1f2] dark:bg-rose-950/30 text-[#e11d48] dark:text-rose-400 border-[#fecdd3] dark:border-rose-900/50' : 'bg-[#fffbeb] dark:bg-amber-950/30 text-[#d97706] dark:text-amber-500 border-[#fde68a] dark:border-amber-700/50'}`}
                       value={nurse.status || 'Active'}
                       onChange={(e) => onStatusChange(nurse.nurseId, e.target.value)}
                     >
-                      <option value="Active">Active</option>
-                      <option value="Inactive">Inactive</option>
-                      <option value="On Leave">On Leave</option>
+                      <option value="Active" className="bg-[#ecfdf5] text-[#065f46] dark:bg-emerald-950 dark:text-emerald-300">Active</option>
+                      <option value="Inactive" className="bg-[#fff1f2] text-[#9f1239] dark:bg-rose-950 dark:text-rose-300">Inactive</option>
+                      <option value="On Leave" className="bg-[#fffbeb] text-[#92400e] dark:bg-amber-950 dark:text-amber-300">On Leave</option>
                     </select>
                   </td>
                   <td className="p-[16px_12px] align-middle text-center">
