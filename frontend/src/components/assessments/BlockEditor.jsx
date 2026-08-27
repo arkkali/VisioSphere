@@ -181,8 +181,8 @@ const BlockEditor = ({ block, isDark, onUpdate, onFileUploaded, onToast }) => {
               placeholder="Chart Title"
               value={block.content.chartTitle}
               onChange={(e) => update('content', { ...block.content, chartTitle: e.target.value })}
-              sx={{ backgroundColor: isDark ? '#0f172a' : '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: isDark ? '#334155' : 'rgba(0, 0, 0, 0.23)' } }}
-              InputProps={{ sx: { fontWeight: 800, color: isDark ? '#fff' : '#00212e' } }}
+              sx={{ backgroundColor: isDark ? '#0f172a' : '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: isDark ? '#334155' : 'rgba(0, 0, 0, 0.23)' }, '& .MuiInputBase-input': { color: isDark ? '#fff' : '#00212e' } }}
+              InputProps={{ sx: { fontWeight: 800 } }}
             />
           </Box>
 

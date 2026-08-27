@@ -7,6 +7,7 @@ const readLinkedNurse = () => localStorage.getItem('linkedNurseId') || '';
 
 const Sidebar = () => {
   const [accountsOpen, setAccountsOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [isToggleEnabled, setIsToggleEnabled] = useState(readToggle);
   const [linkedNurseId, setLinkedNurseId] = useState(readLinkedNurse);
   const location = useLocation();
@@ -41,6 +42,8 @@ const Sidebar = () => {
     }
   };
 
+  const closeMobileSidebar = () => setMobileOpen(false);
+
   return (
     <>
       <style>{`
@@ -49,7 +52,16 @@ const Sidebar = () => {
           to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
-      <div className="w-[250px] h-screen bg-[#e1f4fd] dark:bg-slate-900 border-r border-transparent dark:border-slate-800 fixed left-0 top-0 flex flex-col z-[1000] box-border shadow-[2px_0_10px_rgba(0,0,0,0.03)] transition-colors duration-300">
+      <button
+        type="button"
+        aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
+        onClick={() => setMobileOpen((open) => !open)}
+        className="md:hidden fixed left-[14px] top-[14px] z-[1100] w-[42px] h-[42px] rounded-[8px] border border-slate-600 bg-slate-900 text-white shadow-lg"
+      >
+        <span className="text-[1.4rem] leading-none">{mobileOpen ? '×' : '☰'}</span>
+      </button>
+      {mobileOpen && <button type="button" aria-label="Close navigation menu" onClick={closeMobileSidebar} className="md:hidden fixed inset-0 z-[950] bg-slate-950/60" />}
+      <div className={`w-[250px] h-screen bg-[#e1f4fd] dark:bg-slate-900 border-r border-transparent dark:border-slate-800 fixed left-0 top-0 flex flex-col z-[1000] box-border shadow-[2px_0_10px_rgba(0,0,0,0.03)] transition-all duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="pt-[30px] px-[24px] pb-[10px] flex items-center justify-center w-full box-border">
           <img src={visioLogo} alt="VisioSphere Logo" className="max-w-[180px] h-auto object-contain dark:brightness-200 dark:contrast-200 transition-all duration-300" />
         </div>
@@ -79,8 +91,8 @@ const Sidebar = () => {
           </div>
         )}
 
-        <nav className="flex-1 flex flex-col gap-[10px] px-[16px] overflow-y-auto">
-          <NavLink to={basePath} end className={({ isActive }) => `group flex items-center justify-between py-[12px] px-[16px] rounded-[12px] no-underline bg-transparent border-none cursor-pointer transition-all duration-200 w-full box-border text-left ${isActive ? 'bg-gradient-to-br from-[#38bdf8] to-[#0284c7] shadow-[0_4px_12px_rgba(2,132,199,0.3)]' : 'hover:bg-[#00a8e814] dark:hover:bg-slate-800'}`}>
+        <nav onClick={closeMobileSidebar} className="flex-1 flex flex-col gap-[10px] px-[16px] overflow-y-auto">
+          <NavLink to={basePath} end onClick={closeMobileSidebar} className={({ isActive }) => `group flex items-center justify-between py-[12px] px-[16px] rounded-[12px] no-underline bg-transparent border-none cursor-pointer transition-all duration-200 w-full box-border text-left ${isActive ? 'bg-gradient-to-br from-[#38bdf8] to-[#0284c7] shadow-[0_4px_12px_rgba(2,132,199,0.3)]' : 'hover:bg-[#00a8e814] dark:hover:bg-slate-800'}`}>
             {({ isActive }) => (
               <>
                 <div className="flex flex-col leading-[1.3]">

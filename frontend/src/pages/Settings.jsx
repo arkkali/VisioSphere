@@ -25,6 +25,14 @@ import {
 
 const getAdminId = () => localStorage.getItem('adminId') || '';
 
+const formatPersonName = (person) => {
+  const firstName = person?.firstName?.trim() || '';
+  const lastName = person?.lastName?.trim() || '';
+  return firstName && firstName.toLowerCase() === lastName.toLowerCase()
+    ? firstName
+    : [firstName, lastName].filter(Boolean).join(' ');
+};
+
 const Settings = () => {
   const { setTheme: setGlobalTheme } = useTheme();
   const location = useLocation();
@@ -74,7 +82,7 @@ const Settings = () => {
         if (storedLinkedId && adminId) {
           try {
             const nurseData = await fetchLinkedNurseProfile(adminId);
-            setDisplayName(`${nurseData.firstName} ${nurseData.lastName}`);
+            setDisplayName(formatPersonName(nurseData));
             setResolvedNurseId(nurseData.nurseId || storedLinkedId);
             setIs2FAEnabled(nurseData.is2FAEnabled || false);
           } catch {
@@ -88,6 +96,7 @@ const Settings = () => {
           if (standaloneNurseId) {
             try {
               const { data } = await import('../api/axiosInstance').then(m => m.default.get(`/nurses/${standaloneNurseId}`));
+              setDisplayName(formatPersonName(data) || 'Nurse Profile');
               setIs2FAEnabled(data.is2FAEnabled || false);
             } catch {
               setIs2FAEnabled(false);
