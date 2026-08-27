@@ -73,18 +73,17 @@ const DailyAssessments = () => {
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
   }, []);
 
-  const resolveNurseId = async () => {
+  const resolveNurseProfile = async () => {
     const directNurseId = localStorage.getItem('nurseId');
-    if (directNurseId) return directNurseId;
+    if (directNurseId) {
+      const { data } = await axiosInstance.get(`/nurses/${directNurseId}`);
+      return data;
+    }
 
     const adminId = localStorage.getItem('adminId');
     if (adminId) {
-      try {
-        const { data } = await axiosInstance.get(`/nurses/linked-profile/${adminId}`);
-        return data?.nurseId ?? null;
-      } catch {
-        return null;
-      }
+      const { data } = await axiosInstance.get(`/nurses/linked-profile/${adminId}`);
+      return data;
     }
 
     return null;
@@ -94,12 +93,13 @@ const DailyAssessments = () => {
     const loadData = async () => {
       try {
         if (isNurseView) {
-          const nId = await resolveNurseId();
-          const nName = localStorage.getItem('nurseName') || localStorage.getItem('adminName') || 'Nurse';
-          if (nId) {
-            setActiveUser({ id: nId, name: nName });
-            const data = await fetchResidentsByNurse(nId);
-            setResidents(data);
+          const nurseProfile = await resolveNurseProfile();
+          if (nurseProfile?.nurseId) {
+            const nName = [nurseProfile.firstName, nurseProfile.lastName]
+              .filter(Boolean)
+              .join(' ') || 'Nurse';
+            setActiveUser({ id: nurseProfile.nurseId, name: nName });
+            setResidents(nurseProfile.assignedElders || await fetchResidentsByNurse(nurseProfile.nurseId));
           } else {
             setResidents([]);
           }
