@@ -15,6 +15,7 @@ const adminSchema = new mongoose.Schema({
   profilePic:    { type: String, default: null },
   theme:         { type: String, enum: ['light', 'dark', 'default'], default: 'default' },
   linkedNurseId: { type: String, default: null },
+  enableSidebarToggle: { type: Boolean, default: false },
   fcmToken:      { type: String, default: null },
   status:        { type: String, enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' },
   role: {
