@@ -194,10 +194,27 @@ exports.linkNurse = async (customId, nurseId) => {
   nurse.status = 'Active';
   nurse.isFirstLogin = false;
 
-  if (admin.is2FAEnabled) {
-    nurse.is2FAEnabled = true;
-    nurse.twoFaPin = admin.twoFaPin;
-  }
+  // 2FA IS DELIBERATELY NOT INHERITED. This block used to copy the admin's
+  // flag and PIN onto the nurse, and it locked the nurse out of the system
+  // permanently:
+  //
+  //   * the admin's PIN is stored in PLAINTEXT and verified by string equality
+  //     (adminAuthService: `admin.twoFaPin !== pin`)
+  //   * the nurse's PIN is verified with bcrypt.compare(pin, nurse.twoFaPin)
+  //
+  // So the copied value was a raw 4-digit string sitting where a bcrypt hash
+  // was expected. bcrypt.compare can never match it. The nurse was asked for a
+  // PIN on every login, no PIN could ever satisfy it, and nothing in the UI
+  // explained why or offered a way out.
+  //
+  // Even with the hashing fixed, inheriting is the wrong behaviour: it hands
+  // the nurse a second factor that is really the ADMIN's secret, without
+  // telling either of them. A nurse who wants 2FA enables it themselves
+  // (nurseService.toggle2FA), which hashes the PIN properly.
+  //
+  // If a nurse is already locked out by the old behaviour, clear it directly:
+  //   db.nurses.updateOne({ nurseId: 'STN-XXXXXX' },
+  //                       { $set: { is2FAEnabled: false, twoFaPin: null } })
 
   await nurse.save();
 
@@ -207,7 +224,6 @@ exports.linkNurse = async (customId, nurseId) => {
     purpose: `Linked admin account to nurse ID: ${nurseId}`, status: 'success',
     newValues: {
       linkedNurseId: nurseId,
-      ...(admin.is2FAEnabled && { nurse2FAInherited: 'true' }),
     }
   });
 
