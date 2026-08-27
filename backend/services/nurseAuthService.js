@@ -67,7 +67,7 @@ exports.login = async (nurseId, password) => {
         { expiresIn: '15m' }
       ),
       nurse: {
-        nurseId: nurse.nurseId, firstName: nurse.firstName,
+        nurseId: nurse.nurseId, displayName: nurse.displayName, firstName: nurse.firstName,
         lastName: nurse.lastName, houseAssigned: nurse.houseAssigned,
         profilePic: nurse.profilePic
       }
@@ -92,7 +92,7 @@ exports.login = async (nurseId, password) => {
     return {
       requires2FA: true,
       nurse: {
-        nurseId: nurse.nurseId, firstName: nurse.firstName,
+        nurseId: nurse.nurseId, displayName: nurse.displayName, firstName: nurse.firstName,
         lastName: nurse.lastName, houseAssigned: nurse.houseAssigned,
         theme: nurse.theme, profilePic: nurse.profilePic
       }
@@ -117,7 +117,7 @@ exports.login = async (nurseId, password) => {
     isFirstLogin: false,
     token,
     nurse: {
-      nurseId: nurse.nurseId, firstName: nurse.firstName,
+      nurseId: nurse.nurseId, displayName: nurse.displayName, firstName: nurse.firstName,
       lastName: nurse.lastName, houseAssigned: nurse.houseAssigned,
       status: nurse.status, theme: nurse.theme, profilePic: nurse.profilePic
     }
@@ -157,7 +157,7 @@ exports.verify2FA = async (nurseId, pin) => {
   return {
     token,
     nurse: {
-      nurseId: nurse.nurseId, firstName: nurse.firstName,
+      nurseId: nurse.nurseId, displayName: nurse.displayName, firstName: nurse.firstName,
       lastName: nurse.lastName, houseAssigned: nurse.houseAssigned,
       status: nurse.status, theme: nurse.theme, profilePic: nurse.profilePic
     }

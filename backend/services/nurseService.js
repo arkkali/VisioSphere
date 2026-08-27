@@ -113,11 +113,7 @@ exports.updateProfile = async (nurseId, { name, theme }) => {
 
   const oldName = `${nurse.firstName} ${nurse.lastName}`;
 
-  if (name) {
-    const parts = name.trim().split(' ');
-    nurse.firstName = parts[0] || nurse.firstName;
-    nurse.lastName = parts.slice(1).join(' ') || nurse.lastName;
-  }
+  if (name !== undefined) nurse.displayName = name.trim();
   if (theme) nurse.theme = theme;
   await nurse.save();
 

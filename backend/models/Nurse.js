@@ -10,6 +10,7 @@ const nurseSchema = new mongoose.Schema({
   firstName:  { type: String, required: true },
   middleName: { type: String, default: '' },
   lastName:   { type: String, required: true },
+  displayName: { type: String, default: '' },
   email:      { type: String, required: true, unique: true },
   birthday:   { type: Date },
   gender:     { type: String, enum: ['M', 'F'] },
