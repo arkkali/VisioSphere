@@ -16,6 +16,7 @@ import {
 } from '@mui/material';
 import AssessmentCard from '../components/assessments/AssessmentCard';
 import AssessmentEditor from '../components/assessments/AssessmentEditor';
+import DeleteAssessmentDialog from '../components/assessments/DeleteAssessmentDialog';
 import {
   fetchAllResidents,
   fetchResidentsByNurse,
@@ -64,6 +65,7 @@ const DailyAssessments = () => {
 
   const [expandedAssessmentIds, setExpandedAssessmentIds] = useState([]);
   const [commentText, setCommentText] = useState({});
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const showToast = useCallback((message, type = 'success') => {
     const id = Date.now();
@@ -292,14 +294,15 @@ const DailyAssessments = () => {
   };
 
   const handleDeleteAssessment = async (assessmentId) => {
-    if (!window.confirm('Are you sure you want to delete this assessment? This cannot be undone.')) return;
     const prev = [...assessments];
     setAssessments((a) => a.filter((x) => x._id !== assessmentId));
     try {
       await deleteAssessment(assessmentId);
+      setDeleteTarget(null);
       showToast('Assessment deleted successfully');
     } catch {
       setAssessments(prev);
+      setDeleteTarget(null);
       showToast('Failed to delete assessment', 'error');
     }
   };
@@ -434,7 +437,7 @@ const DailyAssessments = () => {
                         onCommentChange={(text) => handleCommentChange(assessment._id, text)}
                         onSendComment={() => handleSendComment(assessment._id)}
                         onEditClick={() => handleEditClick(assessment)}
-                        onDeleteClick={() => handleDeleteAssessment(assessment._id)}
+                        onDeleteClick={() => setDeleteTarget(assessment)}
                       />
                     ))
                   )}
@@ -463,6 +466,12 @@ const DailyAssessments = () => {
 
           </div>
         </main>
+
+        <DeleteAssessmentDialog
+          assessment={deleteTarget}
+          onConfirm={handleDeleteAssessment}
+          onCancel={() => setDeleteTarget(null)}
+        />
 
         <Box sx={{ position: 'fixed', bottom: 24, right: 24, zIndex: 3000, display: 'flex', flexDirection: 'column', gap: 1.5, pointerEvents: 'none', maxWidth: 400 }}>
           {toasts.map((toast) => (
