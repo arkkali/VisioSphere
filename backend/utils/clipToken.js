@@ -52,8 +52,19 @@ const SECRET = process.env.CLIP_SIGNING_SECRET || '';
 // it repeatedly, short enough that a leaked URL is stale by the time it is
 // pasted anywhere.
 const DEFAULT_TTL = parseInt(process.env.CLIP_TOKEN_TTL_SECONDS || '300', 10);
+// Attachments are read while someone sits reading a report, so a 5-minute
+// window is too short — an image would 403 halfway through the shift.
+const ATTACHMENT_VIEW_TTL = parseInt(
+  process.env.ATTACHMENT_TOKEN_TTL_SECONDS || '3600', 10);
 
-const VERSION_FOR = { play: 'v1', delete: 'v1d' };
+// play/delete are for CCTV clips; view/write are for report attachments
+// (assessment images and files). Same secret, same HMAC, different version
+// prefixes — and the prefix is part of the SIGNED message, so a token minted
+// for one purpose can never satisfy another. Every viewer of a report receives
+// `view` tokens, which end up in their browser history and network tab; if one
+// of those could be replayed as a `write`, opening a resident's report would be
+// enough to overwrite their file.
+const VERSION_FOR = { play: 'v1', delete: 'v1d', view: 'v1u', write: 'v1w' };
 
 function _sign(message) {
   return crypto.createHmac('sha256', SECRET).update(message).digest('hex');
@@ -108,6 +119,23 @@ function signClipToken(filename, ttlSeconds = DEFAULT_TTL, action = 'play') {
  * visible, greppable decision at the call site. TTL is short: a delete token
  * is minted and used within one request, never handed to a browser.
  */
+/**
+ * Mint a token for one report attachment on the mini PC.
+ *
+ *   action 'view'  — handed to the browser so it can load the file. TTL is
+ *                    long enough that an open report does not break mid-read.
+ *   action 'write' — used server-side for the one PUT that stores the file,
+ *                    never handed to a browser, so the TTL is short.
+ *
+ * Verified by _verify_upload_token in ai_core/cctv_core.py, which mirrors this.
+ */
+function signUploadToken(filename, action = 'view', ttlSeconds = null) {
+  const ttl = ttlSeconds != null
+    ? ttlSeconds
+    : (action === 'write' ? 60 : ATTACHMENT_VIEW_TTL);
+  return signClipToken(filename, ttl, action);
+}
+
 function signClipDeleteToken(filename, ttlSeconds = 60) {
   return signClipToken(filename, ttlSeconds, 'delete');
 }
@@ -143,6 +171,7 @@ function verifyClipToken(token, filename, action = 'play') {
 }
 
 module.exports = {
+  signUploadToken,
   signClipToken,
   signClipDeleteToken,
   verifyClipToken,
