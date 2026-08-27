@@ -91,9 +91,25 @@ const ResidentTable = ({
                           onClick={(e) => e.stopPropagation()}
                           className={`w-[85%] p-[8px_30px_8px_12px] border-[1.5px] rounded-[6px] text-[0.85rem] font-bold cursor-pointer outline-none shadow-sm appearance-none bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%2300212e%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%23ffffff%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] bg-no-repeat bg-[right_10px_center] ${resident.attendance === 'Present' ? 'bg-[#f0fdf4] dark:bg-emerald-950/30 text-[#059669] dark:text-emerald-400 border-[#bbf7d0] dark:border-emerald-900/50' : resident.attendance === 'Not Present' ? 'bg-[#fff1f2] dark:bg-rose-950/30 text-[#e11d48] dark:text-rose-400 border-[#fecdd3] dark:border-rose-900/50' : 'bg-white dark:bg-slate-800 text-[#64748b] dark:text-slate-300 border-[#cbd5e1] dark:border-slate-600'}`}
                         >
-                          <option value="" disabled hidden>Mark Status</option>
-                          <option value="Present">Present</option>
-                          <option value="Not Present">Not Present</option>
+                          {/* The <select> was themed but its <option>s were not.
+                              A native option list does NOT inherit the select's
+                              colours — the browser paints it from the OS theme,
+                              so in dark mode the open dropdown came out as pale
+                              text on a pale popup and was effectively unreadable.
+                              Options only honour inline background/color, which
+                              is why this is a style prop and not a class. */}
+                          <option value="" disabled hidden
+                            style={{ backgroundColor: '#ffffff', color: '#64748b' }}>
+                            Mark Status
+                          </option>
+                          <option value="Present"
+                            style={{ backgroundColor: '#ffffff', color: '#047857' }}>
+                            Present
+                          </option>
+                          <option value="Not Present"
+                            style={{ backgroundColor: '#ffffff', color: '#be123c' }}>
+                            Not Present
+                          </option>
                         </select>
                       </td>
                       <td className="p-[16px_14px] align-middle text-center min-w-[140px]">

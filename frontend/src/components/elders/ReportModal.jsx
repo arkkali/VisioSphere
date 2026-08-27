@@ -57,6 +57,13 @@ const ReportModal = ({ barData, overallPercentage, isDark, isSavingReport, onSav
                   }]}
                   margin={{ top: 20, bottom: 60, left: 40, right: 10 }}
                   sx={{
+                    // Catch-all first: MUI renames its legend/axis classes
+                    // between major versions, and when a targeted selector
+                    // stops matching the text silently falls back to a dark
+                    // fill — invisible on a dark modal, which is exactly how
+                    // the legend labels disappeared here. Every piece of text
+                    // in the chart is an SVG <text>, so this cannot miss.
+                    '& text': { fill: isDark ? '#cbd5e1 !important' : '#334155 !important' },
                     '& .MuiChartsAxis-tickLabel': { fill: isDark ? '#94a3b8 !important' : '#64748b !important' },
                     '& .MuiChartsAxis-line': { stroke: isDark ? '#475569 !important' : '#cbd5e1 !important' },
                     '& .MuiChartsAxis-tick': { stroke: isDark ? '#475569 !important' : '#cbd5e1 !important' },

@@ -145,6 +145,17 @@ const Settings = () => {
       if (isNurseView && resolvedNurseId) {
         await saveNurseProfile(resolvedNurseId, { name: newName, theme: newTheme });
         setDisplayName(newName);
+        // The nurse branch used to return here, before any of the three lines
+        // that actually APPLY a theme. The value was saved to the nurse's
+        // profile and then ignored by the running app, so the toggle looked
+        // dead for every nurse while working perfectly for admins.
+        //
+        // Writing localStorage alone is not enough either: the `storage` event
+        // only fires in OTHER tabs, so the tab that made the change would not
+        // repaint until a reload. setGlobalTheme is what re-renders it now.
+        localStorage.setItem('appTheme', newTheme);
+        setTheme(newTheme);
+        setGlobalTheme(newTheme);
         await logAudit({
           category: 'Account Management',
           event: 'Nurse Profile Updated',

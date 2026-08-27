@@ -34,9 +34,20 @@ const DailyAssessments = () => {
   const location = useLocation();
   const isNurseView = location.pathname.startsWith('/nurse');
 
-  const [activeUser, setActiveUser] = useState({
-    id: localStorage.getItem('adminId') || localStorage.getItem('nurseId') || 'U-001',
-    name: localStorage.getItem('adminName') || localStorage.getItem('nurseName') || 'System User',
+  // Prefer the identity that matches the VIEW. This used to read adminName
+  // first regardless, so on a /nurse page it showed the admin's name — and if
+  // resolveNurseId() came back empty the effect below never called
+  // setActiveUser, leaving that wrong name on screen with no error to explain
+  // it. Ordering by view means the greeting is right from the first paint.
+  const [activeUser, setActiveUser] = useState(() => {
+    const nurseFirst = window.location.pathname.startsWith('/nurse');
+    const id = nurseFirst
+      ? localStorage.getItem('nurseId') || localStorage.getItem('adminId')
+      : localStorage.getItem('adminId') || localStorage.getItem('nurseId');
+    const name = nurseFirst
+      ? localStorage.getItem('nurseName') || localStorage.getItem('adminName')
+      : localStorage.getItem('adminName') || localStorage.getItem('nurseName');
+    return { id: id || 'U-001', name: name || 'System User' };
   });
 
   const [residents, setResidents] = useState([]);

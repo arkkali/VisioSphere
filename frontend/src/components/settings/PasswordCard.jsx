@@ -22,6 +22,10 @@ const PasswordCard = ({ onSubmit }) => {
   });
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  // Its own state rather than reusing showNew: someone re-typing a password
+  // they cannot see wants to reveal exactly the field they are stuck on, and
+  // tying the two together reveals both at once on a shared screen.
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleSubmit = () => {
     onSubmit(passwords, () =>
@@ -63,12 +67,17 @@ const PasswordCard = ({ onSubmit }) => {
         </div>
         <div className="flex flex-col gap-[8px]">
           <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Confirm New Password</label>
-          <input
-            type={showNew ? 'text' : 'password'}
-            value={passwords.confirmPassword}
-            onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })}
-            className="w-full p-[12px_16px] bg-white dark:bg-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-600 rounded-[8px] text-[1rem] text-[#00212e] dark:text-white outline-none focus:border-[#00a8e8] dark:focus:border-[#00a8e8] transition-colors box-border"
-          />
+          <div className="relative">
+            <input
+              type={showConfirm ? 'text' : 'password'}
+              value={passwords.confirmPassword}
+              onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })}
+              className="w-full p-[12px_16px] pr-[44px] bg-white dark:bg-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-600 rounded-[8px] text-[1rem] text-[#00212e] dark:text-white outline-none focus:border-[#00a8e8] dark:focus:border-[#00a8e8] transition-colors box-border"
+            />
+            <button type="button" onClick={() => setShowConfirm(!showConfirm)} className="absolute right-[12px] top-[14px] bg-transparent border-none text-[#94a3b8] dark:text-slate-400 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0">
+              {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
         </div>
       </div>
       <button
