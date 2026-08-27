@@ -99,7 +99,7 @@ const DailyAssessments = () => {
               .filter(Boolean)
               .join(' ') || 'Nurse';
             setActiveUser({ id: nurseProfile.nurseId, name: nName });
-            setResidents(nurseProfile.assignedElders || await fetchResidentsByNurse(nurseProfile.nurseId));
+            setResidents(await fetchResidentsByNurse(nurseProfile.nurseId));
           } else {
             setResidents([]);
           }
