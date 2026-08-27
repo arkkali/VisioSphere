@@ -243,7 +243,8 @@ const AdminDashboard = () => {
               const nurseRes = await axiosInstance.get(route, { signal: abortController.signal });
               if (nurseRes.data) {
                 setAdminProfile({
-                  name: `${nurseRes.data.firstName} ${nurseRes.data.lastName}`,
+                  name: nurseRes.data.displayName?.trim()
+                    || `${nurseRes.data.firstName} ${nurseRes.data.lastName}`,
                   role: 'Nurse',
                   id:   nurseRes.data.nurseId,
                 });

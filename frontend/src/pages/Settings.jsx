@@ -155,6 +155,9 @@ const Settings = () => {
       if (isNurseView && resolvedNurseId) {
         await saveNurseProfile(resolvedNurseId, { name: newName, theme: newTheme });
         setDisplayName(newName);
+        localStorage.setItem('nurseName', newName);
+        localStorage.setItem('userName', newName);
+        window.dispatchEvent(new Event('localStorageUpdate'));
         // The nurse branch used to return here, before any of the three lines
         // that actually APPLY a theme. The value was saved to the nurse's
         // profile and then ignored by the running app, so the toggle looked
