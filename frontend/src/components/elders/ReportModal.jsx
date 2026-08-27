@@ -91,6 +91,7 @@ const ReportModal = ({ barData, overallPercentage, isDark, isSavingReport, onSav
                     [`& .${gaugeClasses.valueArc}`]: { fill: isDark ? '#38bdf8' : '#00a8e8' },
                     [`& .${gaugeClasses.referenceArc}`]: { fill: isDark ? '#334155' : '#e1f5fe' },
                     [`& .${gaugeClasses.valueText}`]: { fill: isDark ? '#fff !important' : '#00212e !important', color: isDark ? '#fff !important' : '#00212e !important', fontSize: '2.5rem', fontWeight: 800 },
+                    '& text': { fill: isDark ? '#fff !important' : '#00212e !important', color: isDark ? '#fff !important' : '#00212e !important' },
                   }}
                 />
               </div>
