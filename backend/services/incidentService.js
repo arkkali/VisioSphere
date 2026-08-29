@@ -246,14 +246,50 @@ async function getWeeklyStats(query) {
 
   let since, until, windowDays, anchorISO;
 
+  // ONE DAY OF SLACK ON EACH END — this is the whole fix for "today's alerts
+  // are counted in ALERTS TODAY but the 7-Day History says 0".
+  //
+  // THE BUG
+  //
+  // This function filters on `createdAt` in UTC but BUCKETS with
+  // $dateToString({ timezone: tz }) in the caller's zone. Those are two
+  // different calendars, and the window was built on the wrong one:
+  // `weekStart + 'T00:00:00Z'` is UTC midnight, which in Manila (UTC+8) is
+  // 08:00 that morning. So every incident between local midnight and local
+  // 08:00 on the first day of the week fell OUTSIDE the $match and was never
+  // counted — while getDailyStats(), which does convert to local midnight
+  // properly, counted them. Sunday 30 Aug: four alerts at 05:45-06:29 local,
+  // "ALERTS TODAY 04", and a chart reading 0 for the week. Same data, two
+  // calendars.
+  //
+  // WHY SLACK RATHER THAN EXACT LOCAL BOUNDARIES
+  //
+  // `tz` is whatever the client sent — an Olson name from the web
+  // ("Asia/Manila") or a UTC offset from mobile ("+08:00"). Converting a local
+  // midnight to a UTC instant for BOTH forms, correctly across DST, is the job
+  // of a tz library this service does not have. It does not need one: the
+  // grouping stage below is ALREADY tz-correct, and the result loop only emits
+  // the seven dates it was asked for. So the $match only has to avoid throwing
+  // away rows the bucketing would have kept. Widening it by a day at each end
+  // does exactly that — no offset in use is more than 14 hours from UTC — and
+  // anything extra it lets through lands under a date key the loop never reads.
+  //
+  // Cost is one extra day of documents scanned on an indexed range. Do not
+  // "tighten" this back to exact UTC midnights; that is the bug.
+  const SLACK_MS = 24 * 60 * 60 * 1000;
+
   if (weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
-    since = new Date(weekStart + 'T00:00:00Z');
-    until = new Date(since.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const anchorMs = new Date(weekStart + 'T00:00:00Z').getTime();
+    since = new Date(anchorMs - SLACK_MS);
+    until = new Date(anchorMs + 7 * 24 * 60 * 60 * 1000 + SLACK_MS);
     windowDays = 7;
     anchorISO = weekStart;
   } else {
+    // No slack needed at the `until` end here: it is "now", and nothing is
+    // recorded in the future. The oldest day still needs it, for the same
+    // reason as above.
     until = new Date();
-    since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    since = new Date(Date.now() - days * 24 * 60 * 60 * 1000 - SLACK_MS);
     windowDays = days;
     anchorISO = null;
   }
