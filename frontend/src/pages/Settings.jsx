@@ -25,7 +25,11 @@ import {
 
 const getAdminId = () => localStorage.getItem('adminId') || '';
 
+// See Login.jsx — profileName is resolved server-side so web and mobile can
+// never drift; everything below it is the old rule, kept as a fallback for a
+// backend deployed before profileName existed.
 const formatPersonName = (person) => {
+  if (person?.profileName?.trim()) return person.profileName.trim();
   if (person?.displayName?.trim()) return person.displayName.trim();
   const firstName = person?.firstName?.trim() || '';
   const lastName = person?.lastName?.trim() || '';

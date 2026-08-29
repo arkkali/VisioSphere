@@ -243,7 +243,10 @@ const AdminDashboard = () => {
               const nurseRes = await axiosInstance.get(route, { signal: abortController.signal });
               if (nurseRes.data) {
                 setAdminProfile({
-                  name: nurseRes.data.displayName?.trim()
+                  // See Login.jsx — profileName is the server-resolved name;
+                  // the rest is the old rule kept as a fallback.
+                  name: nurseRes.data.profileName?.trim()
+                    || nurseRes.data.displayName?.trim()
                     || `${nurseRes.data.firstName} ${nurseRes.data.lastName}`,
                   role: 'Nurse',
                   id:   nurseRes.data.nurseId,
@@ -257,6 +260,42 @@ const AdminDashboard = () => {
               if (!axios.isCancel(nurseErr))
                 setAdminProfile({ name: storedName, role: storedRole, id: storedId });
             }
+          }
+        } else if (isAdminId(storedId)) {
+          // THE MIRROR OF THE MOBILE BUG.
+          //
+          // The nurse branch above re-reads the profile from the server, so a
+          // nurse renamed anywhere shows up here on the next load. The admin
+          // branch did not exist at all: the admin header came from
+          // localStorage alone, written at sign-in and never refreshed. So an
+          // admin who renamed themselves ON THE PHONE kept seeing the old name
+          // on this dashboard until they signed out and back in — the same
+          // complaint, pointing the other way.
+          //
+          // The server is the single source of truth for the name; this is just
+          // the web looking at it again.
+          try {
+            const adminRes = await axiosInstance.get(`/admin/${storedId}`, { signal: abortController.signal });
+            const adminData = adminRes.data?.adminData ?? adminRes.data;
+            // profileName is resolved server-side (backend/models/Admin.js);
+            // `name` is the same value and is the fallback for a backend
+            // deployed before profileName existed.
+            const resolvedName = adminData?.profileName?.trim() || adminData?.name?.trim();
+            if (resolvedName) {
+              setAdminProfile({ name: resolvedName, role: storedRole, id: storedId });
+              localStorage.setItem('userName', resolvedName);
+              localStorage.setItem('adminName', resolvedName);
+              // Same event Settings.jsx fires: the sidebar and header listen for
+              // it, and the plain `storage` event only fires in OTHER tabs.
+              window.dispatchEvent(new Event('localStorageUpdate'));
+            }
+            if (adminData?.profilePic) {
+              setProfilePic(adminData.profilePic);
+              localStorage.setItem('adminProfilePic', adminData.profilePic);
+            }
+          } catch {
+            // Offline or a 4xx: keep the cached name. A failed refresh must
+            // never blank the header or surface an error banner for this.
           }
         }
       } catch (err) {

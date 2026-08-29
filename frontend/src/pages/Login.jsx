@@ -24,7 +24,13 @@ const facilityFromToken = (token) => {
   }
 };
 
-const nurseDisplayName = (nurse) => nurse.displayName?.trim()
+// `profileName` is resolved server-side (backend/models/Nurse.js) so the web,
+// the mobile app and the API can never disagree about what someone is called.
+// The two fallbacks below reproduce the old rule and exist only so this build
+// still works against a backend deployed before profileName — drop them once
+// every environment is on the new one.
+const nurseDisplayName = (nurse) => nurse.profileName?.trim()
+  || nurse.displayName?.trim()
   || `${nurse.firstName || ''} ${nurse.lastName || ''}`.trim()
   || 'Nurse';
 

@@ -27,7 +27,10 @@ import {
 } from '../services/assessmentService';
 import axiosInstance from '../api/axiosInstance';
 
-const nurseDisplayName = (nurse) => nurse?.displayName?.trim()
+// See Login.jsx — profileName is the server-resolved name; the rest is the old
+// rule kept as a fallback for a backend deployed before it.
+const nurseDisplayName = (nurse) => nurse?.profileName?.trim()
+  || nurse?.displayName?.trim()
   || [nurse?.firstName, nurse?.lastName].filter(Boolean).join(' ')
   || 'Nurse';
 
