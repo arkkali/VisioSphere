@@ -94,6 +94,50 @@ nurseSchema.statics.deactivate = async function (nurseId) {
   );
 };
 
+/**
+ * The name every client should PRINT for this nurse.
+ *
+ * THE BUG THIS EXISTS TO KILL
+ *
+ * updateProfile() writes a nurse's chosen name to `displayName`, but every read
+ * path built the name from `firstName + ' ' + lastName` instead. The field was
+ * write-only: a nurse renamed herself, the value went into the database, and
+ * nothing on earth ever read it back. She saw the old name on the dashboard, in
+ * the settings box after a reload, and after the next sign-in — on mobile
+ * always, and on the web anywhere a screen had not been patched by hand.
+ *
+ * The web had grown FOUR separate copies of `displayName?.trim() || firstName
+ * lastName` (Login, Settings, AdminDashboard, DailyAssessments) and mobile had
+ * none. Four copies of a rule is four chances to miss one, which is exactly what
+ * happened. So the rule lives here now, on the server, and every client just
+ * prints what it is given.
+ *
+ * WHY A NEW NAME AND NOT JUST `displayName`
+ *
+ * `displayName` is a real stored column — the nurse's OVERRIDE, empty until she
+ * sets one. A virtual cannot share its name, and renaming the column would
+ * silently discard the override of every nurse who has already set one, with no
+ * migration to put it back. So the stored field keeps its name and meaning, and
+ * `profileName` is the resolved answer: the override when there is one, the
+ * legal name otherwise.
+ *
+ * SCOPE: this is the SELF-PROFILE name — greetings, the settings box, the
+ * profile card. The admin's staff roster deliberately keeps showing firstName /
+ * lastName, because that is a staff record and a nurse should not be able to
+ * rename herself out of it.
+ */
+nurseSchema.virtual('profileName').get(function () {
+  const chosen = (this.displayName || '').trim();
+  if (chosen) return chosen;
+  return `${this.firstName || ''} ${this.lastName || ''}`.trim();
+});
+
+// Virtuals are OFF by default in toJSON/toObject, so without this the field
+// above would exist on the document and vanish the moment res.json() touched it
+// — which is the same invisible failure all over again, one layer down.
+nurseSchema.set('toJSON',   { virtuals: true });
+nurseSchema.set('toObject', { virtuals: true });
+
 // Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
 // See models/plugins/facilityScope.js.
 nurseSchema.plugin(facilityScope);

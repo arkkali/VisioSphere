@@ -67,7 +67,12 @@ exports.login = async (nurseId, password) => {
         { expiresIn: '15m' }
       ),
       nurse: {
-        nurseId: nurse.nurseId, displayName: nurse.displayName, firstName: nurse.firstName,
+        // profileName is the name clients PRINT: the nurse's own displayName
+        // override when set, her legal name otherwise. Resolved once, on the
+        // Nurse schema — see models/Nurse.js. Hand-picked objects like this
+        // one skip toJSON, so it has to be listed or it is missing here only.
+        nurseId: nurse.nurseId, profileName: nurse.profileName,
+        displayName: nurse.displayName, firstName: nurse.firstName,
         lastName: nurse.lastName, houseAssigned: nurse.houseAssigned,
         profilePic: nurse.profilePic
       }
@@ -92,7 +97,12 @@ exports.login = async (nurseId, password) => {
     return {
       requires2FA: true,
       nurse: {
-        nurseId: nurse.nurseId, displayName: nurse.displayName, firstName: nurse.firstName,
+        // profileName is the name clients PRINT: the nurse's own displayName
+        // override when set, her legal name otherwise. Resolved once, on the
+        // Nurse schema — see models/Nurse.js. Hand-picked objects like this
+        // one skip toJSON, so it has to be listed or it is missing here only.
+        nurseId: nurse.nurseId, profileName: nurse.profileName,
+        displayName: nurse.displayName, firstName: nurse.firstName,
         lastName: nurse.lastName, houseAssigned: nurse.houseAssigned,
         theme: nurse.theme, profilePic: nurse.profilePic
       }
@@ -117,7 +127,12 @@ exports.login = async (nurseId, password) => {
     isFirstLogin: false,
     token,
     nurse: {
-      nurseId: nurse.nurseId, displayName: nurse.displayName, firstName: nurse.firstName,
+      // profileName is the name clients PRINT: the nurse's own displayName
+      // override when set, her legal name otherwise. Resolved once, on the
+      // Nurse schema — see models/Nurse.js. Hand-picked objects like this
+      // one skip toJSON, so it has to be listed or it is missing here only.
+      nurseId: nurse.nurseId, profileName: nurse.profileName,
+      displayName: nurse.displayName, firstName: nurse.firstName,
       lastName: nurse.lastName, houseAssigned: nurse.houseAssigned,
       status: nurse.status, theme: nurse.theme, profilePic: nurse.profilePic
     }
@@ -157,7 +172,12 @@ exports.verify2FA = async (nurseId, pin) => {
   return {
     token,
     nurse: {
-      nurseId: nurse.nurseId, displayName: nurse.displayName, firstName: nurse.firstName,
+      // profileName is the name clients PRINT: the nurse's own displayName
+      // override when set, her legal name otherwise. Resolved once, on the
+      // Nurse schema — see models/Nurse.js. Hand-picked objects like this
+      // one skip toJSON, so it has to be listed or it is missing here only.
+      nurseId: nurse.nurseId, profileName: nurse.profileName,
+      displayName: nurse.displayName, firstName: nurse.firstName,
       lastName: nurse.lastName, houseAssigned: nurse.houseAssigned,
       status: nurse.status, theme: nurse.theme, profilePic: nurse.profilePic
     }

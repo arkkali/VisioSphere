@@ -15,6 +15,10 @@ const throwError = (message, status) => {
 
 const guardianPublicFields = (g) => ({
   guardianId:       g.guardianId,
+  // The name clients should print. Hand-picked objects like this one do not go
+  // through toJSON, so the schema virtual has to be listed explicitly or it
+  // would be silently missing from the login response only. See Guardian.js.
+  profileName:      g.profileName,
   firstName:        g.firstName,
   middleName:       g.middleName,
   lastName:         g.lastName,

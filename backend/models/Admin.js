@@ -77,6 +77,23 @@ adminSchema.statics.generateCustomId = async function (role, facility) {
   return null;
 };
 
+/**
+ * The name every client should PRINT for this admin.
+ *
+ * An admin has no firstName/lastName split — `name` IS the display name and
+ * updateProfile already writes straight to it, so this is a pass-through. It
+ * exists anyway so that Admin, Nurse and Guardian all answer the same question
+ * with the same field, and a client can read `profileName` without first
+ * working out which kind of account it is holding. See Nurse.js for the full
+ * reasoning.
+ */
+adminSchema.virtual('profileName').get(function () {
+  return (this.name || '').trim();
+});
+
+adminSchema.set('toJSON',   { virtuals: true });
+adminSchema.set('toObject', { virtuals: true });
+
 // Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
 // See models/plugins/facilityScope.js.
 adminSchema.plugin(facilityScope);

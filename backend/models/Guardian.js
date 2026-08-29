@@ -92,6 +92,20 @@ guardianSchema.statics.generateGuardianId = async function (facility) {
   return `${prefix}${nextNumber.toString().padStart(2, '0')}`;
 };
 
+/**
+ * The name every client should PRINT for this guardian.
+ *
+ * Guardians edit firstName / lastName directly in their own settings screen,
+ * so unlike a nurse they have no separate override to honour — but they answer
+ * the same field so a client never has to branch on account type. See Nurse.js.
+ */
+guardianSchema.virtual('profileName').get(function () {
+  return `${this.firstName || ''} ${this.lastName || ''}`.trim();
+});
+
+guardianSchema.set('toJSON',   { virtuals: true });
+guardianSchema.set('toObject', { virtuals: true });
+
 // Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
 // See models/plugins/facilityScope.js.
 guardianSchema.plugin(facilityScope);
