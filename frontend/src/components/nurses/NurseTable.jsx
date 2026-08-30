@@ -1,9 +1,17 @@
 import React from 'react';
-import { hasHouseChoice } from '../../constants/houses';
+import { hasHouseChoice, assignsEldersToNurses } from '../../constants/houses';
 
-const getFullName = (person) => {
-  if (!person) return 'Unknown';
-  return [person.firstName, person.middleName, person.lastName].filter(Boolean).join(' ');
+// The name to PRINT for a nurse: her own Display Name when she has set one,
+// her legal name otherwise. `profileName` is resolved server-side
+// (backend/models/Nurse.js) so web and mobile can never disagree; the rest is
+// a fallback for a backend deployed before profileName existed.
+//
+// Deliberately separate from getFullName, which is also used for residents and
+// must keep printing the legal name.
+const nurseDisplayName = (nurse) => {
+  if (!nurse) return 'Unknown';
+  const resolved = (nurse.profileName || '').trim() || (nurse.displayName || '').trim();
+  return resolved || [nurse.firstName, nurse.middleName, nurse.lastName].filter(Boolean).join(' ') || 'Unknown';
 };
 
 const NurseTable = ({
@@ -23,6 +31,14 @@ const NurseTable = ({
 }) => {
   // Resolved once per render: the facility cannot change without a fresh login.
   const showHouse = hasHouseChoice();
+  // Saint Anthony has no per-nurse caseload, so both the "Elders Assigned"
+  // column and the Assign action are meaningless there — an empty column that
+  // always reads "None" looks like missing data rather than a fact about the
+  // facility. See assignsEldersToNurses in constants/houses.js.
+  const showAssign = assignsEldersToNurses();
+  // Fixed columns: checkbox, Nurse ID, Name, Setup Status, Account Status.
+  // House adds one; the caseload pair adds Elders Assigned + Actions.
+  const columnCount = 5 + (showHouse ? 1 : 0) + (showAssign ? 2 : 0);
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-[12px] shadow-sm border border-[#E5E7EB] dark:border-slate-700 overflow-hidden transition-colors duration-300">
@@ -45,17 +61,21 @@ const NurseTable = ({
               {showHouse && (
                 <th className="p-[16px_12px] text-left font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">House Assigned</th>
               )}
-              <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Elders Assigned</th>
+              {showAssign && (
+                <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Elders Assigned</th>
+              )}
               <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Setup Status</th>
               <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Account Status</th>
-              <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Actions</th>
+              {showAssign && (
+                <th className="p-[16px_12px] text-center font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">Actions</th>
+              )}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={showHouse ? 8 : 7} className="text-center p-[60px] text-[#A8A8A8] dark:text-slate-500 font-medium text-[1rem]">Loading medical staff...</td></tr>
+              <tr><td colSpan={columnCount} className="text-center p-[60px] text-[#A8A8A8] dark:text-slate-500 font-medium text-[1rem]">Loading medical staff...</td></tr>
             ) : currentNurses.length === 0 ? (
-              <tr><td colSpan={showHouse ? 8 : 7} className="text-center p-[60px] text-[#A8A8A8] dark:text-slate-500 font-medium text-[1rem]">No records found.</td></tr>
+              <tr><td colSpan={columnCount} className="text-center p-[60px] text-[#A8A8A8] dark:text-slate-500 font-medium text-[1rem]">No records found.</td></tr>
             ) : (
               currentNurses.map((nurse) => (
                 <tr key={nurse.nurseId} className="border-b border-[#F8FAFC] dark:border-slate-700 transition-colors duration-200 hover:bg-[#e1f5fe]/30 dark:hover:bg-slate-700/50">
@@ -71,7 +91,7 @@ const NurseTable = ({
                     <span className="font-bold text-[#00a8e8] dark:text-[#38bdf8] font-mono text-[0.9rem] bg-[#e1f5fe] dark:bg-[#0284c7]/20 p-[4px_8px] rounded-[4px]">{nurse.nurseId}</span>
                   </td>
                   <td className="p-[16px_12px] align-middle">
-                    <span className="font-bold text-[#00212e] dark:text-white text-[0.95rem] block">{getFullName(nurse)}</span>
+                    <span className="font-bold text-[#00212e] dark:text-white text-[0.95rem] block">{nurseDisplayName(nurse)}</span>
                     <span className="text-[#4A4A4A] dark:text-slate-400 text-[0.75rem] font-medium">{nurse.email}</span>
                   </td>
                   {showHouse && (
@@ -79,6 +99,7 @@ const NurseTable = ({
                       {nurse.houseAssigned?.replace('House of ', '') || 'Unassigned'}
                     </td>
                   )}
+                  {showAssign && (
                   <td className="p-[16px_12px] align-middle text-center">
                     {(!nurse.assignedElders || nurse.assignedElders.length === 0) ? (
                       <span className="inline-block p-[4px_10px] bg-[#f1f5f9] dark:bg-slate-700 text-[#64748b] dark:text-slate-300 rounded-[6px] text-[0.75rem] font-bold tracking-[0.5px]">None</span>
@@ -88,6 +109,7 @@ const NurseTable = ({
                       <span className="font-bold text-[#00a8e8] dark:text-[#38bdf8] text-[0.95rem]">{nurse.assignedElders.length} Residents</span>
                     )}
                   </td>
+                  )}
                   <td className="p-[16px_12px] align-middle text-center">
                     {nurse.linkedAdminId ? (
                       <span className="inline-block p-[4px_10px] bg-[#e0e7ff] dark:bg-indigo-950/30 text-[#4f46e5] dark:text-indigo-400 border border-[#c7d2fe] dark:border-indigo-900/50 rounded-full text-[0.7rem] font-bold uppercase tracking-[0.5px]">Linked to Admin</span>
@@ -108,14 +130,16 @@ const NurseTable = ({
                       <option value="On Leave" className="bg-[#fffbeb] text-[#92400e] dark:bg-amber-950 dark:text-amber-300">On Leave</option>
                     </select>
                   </td>
-                  <td className="p-[16px_12px] align-middle text-center">
-                    <button
-                      onClick={() => onOpenAssignDrawer(nurse)}
-                      className="bg-[#00435c] dark:bg-slate-700 text-white p-[8px_16px] rounded-[6px] text-[0.8rem] font-bold hover:bg-[#00212e] dark:hover:bg-slate-600 transition-colors"
-                    >
-                      Assign Elders
-                    </button>
-                  </td>
+                  {showAssign && (
+                    <td className="p-[16px_12px] align-middle text-center">
+                      <button
+                        onClick={() => onOpenAssignDrawer(nurse)}
+                        className="bg-[#00435c] dark:bg-slate-700 text-white p-[8px_16px] rounded-[6px] text-[0.8rem] font-bold hover:bg-[#00212e] dark:hover:bg-slate-600 transition-colors"
+                      >
+                        Assign Elders
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))
             )}

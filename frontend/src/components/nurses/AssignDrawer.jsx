@@ -1,5 +1,19 @@
 import React from 'react';
 
+
+// The name to PRINT for a nurse: her own Display Name when she has set one,
+// her legal name otherwise. `profileName` is resolved server-side
+// (backend/models/Nurse.js) so web and mobile can never disagree; the rest is
+// a fallback for a backend deployed before profileName existed.
+//
+// Deliberately separate from getFullName, which is also used for residents and
+// must keep printing the legal name.
+const nurseDisplayName = (nurse) => {
+  if (!nurse) return 'Unknown';
+  const resolved = (nurse.profileName || '').trim() || (nurse.displayName || '').trim();
+  return resolved || [nurse.firstName, nurse.middleName, nurse.lastName].filter(Boolean).join(' ') || 'Unknown';
+};
+
 const getFullName = (person) => {
   if (!person) return 'Unknown';
   return [person.firstName, person.middleName, person.lastName].filter(Boolean).join(' ');
@@ -32,7 +46,7 @@ const AssignDrawer = ({
           <div>
             <h2 className="m-0 text-[1.4rem] text-[#00212e] dark:text-white font-extrabold">Assign Elders</h2>
             <p className="m-0 text-[0.9rem] text-[#4A4A4A] dark:text-slate-400 font-medium mt-[4px]">
-              For Nurse: <span className="font-bold text-[#00a8e8] dark:text-[#38bdf8]">{getFullName(nurse)}</span>
+              For Nurse: <span className="font-bold text-[#00a8e8] dark:text-[#38bdf8]">{nurseDisplayName(nurse)}</span>
             </p>
           </div>
           <button

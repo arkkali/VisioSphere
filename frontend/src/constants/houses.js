@@ -63,6 +63,30 @@ export const housesFor = (facility) => FACILITY_HOUSES[facility] || [];
 export const hasHouseChoice = () => housesForCurrentUser().length > 1;
 
 /**
+ * Facilities that assign individual residents to individual nurses.
+ *
+ * Grace's does: it is split across six houses and a nurse carries a named
+ * caseload, so "which residents are mine" is real information.
+ *
+ * Saint Anthony does not. It is one building with a single shared floor of
+ * residents, and every nurse on shift is responsible for all of them — so the
+ * assignment step is bookkeeping that changes nothing, and a nurse who happened
+ * not to be assigned would be locked out of residents she is already caring for.
+ *
+ * An explicit policy list, NOT derived from the house count. The two agree
+ * today, but "has more than one house" and "tracks a per-nurse caseload" are
+ * different questions and a future facility could answer them differently.
+ *
+ * Keep in sync with `Facilities.assignsEldersToNurses` in
+ * visiosphere_mobile/lib/core/constants/facilities.dart.
+ */
+const ASSIGNS_ELDERS_TO_NURSES = ['GRACES'];
+
+/** True when the signed-in user's facility assigns residents to nurses. */
+export const assignsEldersToNurses = () =>
+  ASSIGNS_ELDERS_TO_NURSES.includes(currentFacility());
+
+/**
  * The house to use when there is no choice to offer, or null when the facility
  * genuinely has several.
  *

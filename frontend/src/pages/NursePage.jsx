@@ -6,12 +6,25 @@ import AssignDrawer from '../components/nurses/AssignDrawer';
 import AddNurseModal from '../components/nurses/AddNurseModal';
 import EditNurseModal from '../components/nurses/EditNurseModal';
 import DeleteNurseModal from '../components/nurses/DeleteNurseModal';
-import { housesForCurrentUser, soleHouse } from '../constants/houses';
+import { housesForCurrentUser, soleHouse, assignsEldersToNurses } from '../constants/houses';
 
 
 const getFullName = (person) => {
   if (!person) return 'Unknown';
   return [person.firstName, person.middleName, person.lastName].filter(Boolean).join(' ');
+};
+
+// The name to PRINT for a nurse: her own Display Name when she has set one,
+// her legal name otherwise. `profileName` is resolved server-side
+// (backend/models/Nurse.js) so web and mobile can never disagree; the rest is
+// a fallback for a backend deployed before profileName existed.
+//
+// Deliberately separate from getFullName, which is also used for residents and
+// must keep printing the legal name.
+const nurseDisplayName = (nurse) => {
+  if (!nurse) return 'Unknown';
+  const resolved = (nurse.profileName || '').trim() || (nurse.displayName || '').trim();
+  return resolved || [nurse.firstName, nurse.middleName, nurse.lastName].filter(Boolean).join(' ') || 'Unknown';
 };
 
 // Lazy: this module loads before login writes the facility to localStorage.
@@ -110,7 +123,8 @@ const NursePage = () => {
 
   const filteredNurses = nurses
     .filter((nurse) => {
-      const fullName = getFullName(nurse);
+      // Same name the table prints — searching for a name you can see must find it.
+      const fullName = nurseDisplayName(nurse);
       const matchesSearch =
         nurse.nurseId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         fullName.toLowerCase().includes(searchTerm.toLowerCase());
@@ -119,8 +133,8 @@ const NursePage = () => {
     })
     .sort((a, b) => {
       if (sortOrder === 'default') return 0;
-      const nameA = getFullName(a).toLowerCase();
-      const nameB = getFullName(b).toLowerCase();
+      const nameA = nurseDisplayName(a).toLowerCase();
+      const nameB = nurseDisplayName(b).toLowerCase();
       if (sortOrder === 'asc') return nameA.localeCompare(nameB);
       if (sortOrder === 'desc') return nameB.localeCompare(nameA);
       return 0;
@@ -224,7 +238,11 @@ const NursePage = () => {
     }
   };
 
+  // Saint Anthony does not assign residents to nurses, so the drawer is never
+  // reachable there — NurseTable hides the button, and this guard makes the
+  // rule true of the page itself rather than only of the control that opens it.
   const openAssignDrawer = (nurse) => {
+    if (!assignsEldersToNurses()) return;
     setActiveNurseForAssign(nurse);
     setAssignDrawerOpen(true);
     if (elders.length === 0) fetchElders();
