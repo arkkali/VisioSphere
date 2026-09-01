@@ -45,6 +45,14 @@ const ADMINS = [
     pin:      process.env.SEED_ADMIN_1_PIN      || '123456',
   },
   {
+    customId: 'STA-202602',
+    facility: 'SAINT_ANTHONY',
+    name:     'Admin',
+    email:    'admin2@gmail.com',
+    password: process.env.SEED_ADMIN_2_PASSWORD || 'admin2123',
+    pin:      process.env.SEED_ADMIN_2_PIN      || '111111',
+  },
+  {
     customId: 'A-202602',
     facility: 'GRACES',
     name:     'Facility Supervisor',

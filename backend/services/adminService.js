@@ -4,6 +4,92 @@ const Nurse = require('../models/Nurse');
 const Resident = require('../models/Resident');
 const Incident = require('../models/Incident');
 const AuditLog = require('../models/AuditLog');
+const { CAMERA_FACILITY, DEFAULT_FACILITY } = require('../config/facilities');
+const { currentFacility } = require('../models/plugins/facilityScope');
+
+// ── Camera liveness ──────────────────────────────────────────────────────────
+// This used to be `cameras: { online: 2, total: 2 }` — a literal, hardcoded on
+// the way out of this function. It asked nothing and measured nothing, so the
+// dashboard reported "2 / 2 cameras online" with both cameras unplugged, and
+// "All Systems Normal" was drawn on top of it. On a monitoring product that is
+// worse than showing no number at all: it is an assurance nobody checked.
+//
+// ai_core is the only thing that knows. Its /status endpoint reports, per
+// camera, whether a frame arrived within CAMERA_STALE_AFTER_S — real liveness,
+// not "is it listed in the config". It is reachable on the same tunnel origin
+// the clips already come through.
+//
+// FAILS TO UNKNOWN, NEVER TO FINE. If the mini PC cannot be reached, `online`
+// comes back null and the clients say so. The previous behaviour — assume two
+// and paint it green — is the one thing this must never do again.
+const AI_CORE_BASE = (process.env.CLIP_BASE_URL || '').replace(/\/+$/, '');
+const CAMERA_HEALTH_TTL_MS = parseInt(process.env.CAMERA_HEALTH_TTL_MS || '10000', 10);
+const CAMERA_HEALTH_TIMEOUT_MS = parseInt(process.env.CAMERA_HEALTH_TIMEOUT_MS || '2500', 10);
+
+// Every dashboard load would otherwise put a request across the tunnel. The
+// answer only changes on the scale of CAMERA_STALE_AFTER_S (5s), so a short
+// cache costs nothing in freshness and keeps a room full of open dashboards
+// from hammering the mini PC.
+let _cameraHealthCache = { at: 0, value: null };
+
+async function fetchCameraHealth() {
+  if (!AI_CORE_BASE) return null;
+  const now = Date.now();
+  if (_cameraHealthCache.value && now - _cameraHealthCache.at < CAMERA_HEALTH_TTL_MS) {
+    return _cameraHealthCache.value;
+  }
+  try {
+    const res = await fetch(`${AI_CORE_BASE}/status`, {
+      signal: AbortSignal.timeout(CAMERA_HEALTH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const health = Array.isArray(body && body.cameraHealth) ? body.cameraHealth : null;
+    if (!health) return null;
+    _cameraHealthCache = { at: now, value: health };
+    return health;
+  } catch {
+    // Tunnel down, mini PC off, request timed out. Unknown, not zero and
+    // certainly not two — the caller turns this into an explicit "unavailable".
+    return null;
+  }
+}
+
+/**
+ * Camera stat for ONE facility.
+ *
+ * ai_core serves every camera it is configured with, regardless of tenant, so
+ * the list is filtered through CAMERA_FACILITY before counting — a Grace's
+ * admin must not be told about Saint Anthony's rig, and vice versa.
+ *
+ * `total` here is how many cameras ai_core is RUNNING for this facility, which
+ * is not always how many tiles the app draws: the UI also shows placeholders
+ * for hardware that is not installed yet. Clients that know their own tile
+ * count should prefer it for the denominator and use `online` from here.
+ */
+async function cameraStat(facility) {
+  const health = await fetchCameraHealth();
+  if (!health) {
+    return {
+      online: null,
+      total: null,
+      label: 'Camera status unavailable',
+      direction: 'none',
+      available: false,
+    };
+  }
+  const mine = health.filter(
+    (c) => (CAMERA_FACILITY[c && c.id] || DEFAULT_FACILITY) === facility
+  );
+  const online = mine.filter((c) => c && c.online).length;
+  return {
+    online,
+    total: mine.length,
+    label: `${online} / ${mine.length} online`,
+    direction: 'none',
+    available: true,
+  };
+}
 
 const throwError = (message, status) => {
   const err = new Error(message);
@@ -75,7 +161,7 @@ exports.getStats = async (adminId) => {
     elders:  buildStatDiff(eldersThisMonth,  eldersLastMonth,  { period: 'last month' }),
     nurses:  buildStatDiff(nursesThisMonth,  nursesLastMonth,  { period: 'last month' }),
     alerts:  buildStatDiff(alertsToday,      alertsYesterday,  { period: 'yesterday'  }),
-    cameras: { online: 2, total: 2, label: '2 / 2 online', direction: 'none' }
+    cameras: await cameraStat(currentFacility())
   };
 };
 
