@@ -22,6 +22,7 @@ import {
   unlinkNurseAccount,
   deactivateAccount,
 } from '../services/settingsService';
+import { clearSession } from '../utils/browserSession';
 
 const getAdminId = () => localStorage.getItem('adminId') || '';
 
@@ -361,7 +362,7 @@ const Settings = () => {
         status: 'alert',
       });
       await deactivateAccount(adminId);
-      localStorage.clear();
+      clearSession();
       window.location.href = '/login';
     } catch {
       showMessage('Failed to deactivate account. Please contact support.', 'error');

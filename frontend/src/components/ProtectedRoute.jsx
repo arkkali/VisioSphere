@@ -1,6 +1,6 @@
 // frontend/src/components/ProtectedRoute.jsx
-import { useEffect, useRef } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
+import { clearSession } from '../utils/browserSession';
 
 /**
  * Gate for every route that is not the sign-in page.
@@ -29,32 +29,25 @@ import { Navigate, useLocation } from 'react-router-dom';
  * nurse can still reach /admin/*. The backend enforces role separately
  * (authorizeRoles), so the exposure is a rendered page, not the data behind it.
  *
- * WHY THE EXPIRY AND IDLE CHECKS BELOW EXIST
+ * WHY THE EXPIRY CHECK EXISTS
  *
- * Checking that a token is merely PRESENT is not the same as checking that
- * someone is signed in. localStorage survives closing the tab, closing the
- * browser and rebooting the machine, so once anyone signs in on a device, that
- * device walks straight into the admin dashboard forever — no password, no
- * expiry, nothing. On a shared nurses' station, or a laptop that leaves the
- * building, that is the whole login screen defeated.
+ * Checking that a token is merely PRESENT is not the same as checking that it
+ * is still good. The JWT carries its own `exp`, so an expired one is treated as
+ * no token at all rather than rendering the shell and waiting for the first API
+ * call to 401. Read-only: signature verification is the server's job and cannot
+ * be done here.
  *
- * Two additions close it:
+ * WHERE THE IDLE TIMEOUT WENT
  *
- *   1. EXPIRY. The JWT carries its own `exp`. An expired token is treated as
- *      no token at all, rather than rendering the shell and waiting for the
- *      first API call to 401. Read-only: signature verification is the
- *      server's job and cannot be done here.
- *
- *   2. IDLE TIMEOUT. A session with nobody at the keyboard for IDLE_LIMIT_MS
- *      is ended. This is standard for anything showing patient data, and it is
- *      the part that protects an unattended workstation.
+ * This file used to end a session after 30 minutes without a mousedown,
+ * keydown, touchstart or scroll. It signed people out mid-shift — the CCTV wall
+ * is a page you watch, not one you click, and `scroll` on `window` never fires
+ * for this layout's inner scroll panels. Session lifetime is now owned by
+ * utils/browserSession.js, which ends the session when the BROWSER ends
+ * instead: keep working for as long as the machine is up, sign in again after
+ * it is shut down and restarted. Read that file before reintroducing any timer
+ * here.
  */
-
-// 30 minutes. Long enough not to interrupt a nurse mid-shift, short enough
-// that a machine left unattended does not stay open all night.
-const IDLE_LIMIT_MS = 30 * 60 * 1000;
-const IDLE_KEY = 'lastActivityAt';
-const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'touchstart', 'scroll'];
 
 /** Seconds-since-epoch expiry from a JWT, or null if it cannot be read. */
 const tokenExpiry = (token) => {
@@ -79,49 +72,12 @@ const isExpired = (token) => {
   return Date.now() >= exp * 1000;
 };
 
-const idleTooLong = () => {
-  const last = Number(localStorage.getItem(IDLE_KEY));
-  if (!last) return false;        // never stamped — treat this render as fresh
-  return Date.now() - last > IDLE_LIMIT_MS;
-};
-
-const endSession = () => {
-  localStorage.clear();
-};
-
 const ProtectedRoute = ({ children }) => {
   const location = useLocation();
   const token = localStorage.getItem('token');
 
-  const expired = !token || isExpired(token) || idleTooLong();
-  if (expired && token) endSession();
-
-  // Stamp activity and keep a timer running while a protected page is open, so
-  // an unattended tab signs itself out instead of sitting on resident data.
-  const timerRef = useRef(null);
-  useEffect(() => {
-    if (expired) return undefined;
-
-    const stamp = () => {
-      localStorage.setItem(IDLE_KEY, String(Date.now()));
-    };
-    stamp();
-
-    const check = () => {
-      if (idleTooLong()) {
-        endSession();
-        window.location.href = '/';
-      }
-    };
-    timerRef.current = window.setInterval(check, 60 * 1000);
-    ACTIVITY_EVENTS.forEach((e) =>
-      window.addEventListener(e, stamp, { passive: true }));
-
-    return () => {
-      window.clearInterval(timerRef.current);
-      ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, stamp));
-    };
-  }, [expired, location.pathname]);
+  const expired = !token || isExpired(token);
+  if (expired && token) clearSession();
 
   if (expired) {
     // `state.from` records where they were headed, for a later

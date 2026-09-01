@@ -1,6 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import visioLogo from '../assets/visio.png';
+import { clearSession } from '../utils/browserSession';
 
 const readToggle = () => localStorage.getItem('enableSidebarToggle') === 'true';
 const readLinkedNurse = () => localStorage.getItem('linkedNurseId') || '';
@@ -30,7 +31,10 @@ const Sidebar = () => {
     };
   }, []); 
   const handleSignOut = () => {
-    localStorage.clear();
+    // clearSession() rather than localStorage.clear(): the theme and the
+    // remembered sign-in are device preferences the user set on purpose and
+    // must survive signing out. See utils/browserSession.js.
+    clearSession();
     window.location.href = '/';
   };
 

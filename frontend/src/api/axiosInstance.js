@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearSession } from '../utils/browserSession';
 
 const axiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
@@ -40,7 +41,8 @@ axiosInstance.interceptors.response.use(
     if (error.response) storeRenewedToken(error.response);
 
     if (error.response?.status === 401) {
-      localStorage.clear();
+      // Keeps the theme and the remembered sign-in; see utils/browserSession.js.
+      clearSession();
       window.location.href = '/';
     }
     return Promise.reject(error);
