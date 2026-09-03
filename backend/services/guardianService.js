@@ -46,13 +46,36 @@ exports.update = async (guardianId, data) => {
   if (!old) throwError('Guardian not found', 404);
 
   const { firstName, middleName, lastName, email, phone,
-          gender, profilePhoto, birthday, emergencyContact, appTheme } = data;
+          gender, profilePhoto, birthday, emergencyContact, appTheme, status } = data;
 
   const updateData = { firstName, middleName, lastName, email, phone, gender };
   if (profilePhoto !== undefined)     updateData.profilePhoto = profilePhoto;
   if (birthday !== undefined)         updateData.birthday = birthday;
   if (emergencyContact !== undefined) updateData.emergencyContact = emergencyContact;
   if (appTheme !== undefined)         updateData.appTheme = appTheme;
+
+  // Account Status was missing from this whitelist, so the admin panels on web
+  // (GuardianDashboard.jsx, both the row dropdown and the Edit modal) and on
+  // mobile (edit_guardian_modal.dart) sent the new status, got a 200 and a
+  // success toast back, and were handed a document still carrying the OLD
+  // status -- which they wrote straight back into the list. The change looked
+  // like it had been saved and had in fact never left this function.
+  //
+  // The two rules that guard the dedicated PUT /guardians/:id/status route
+  // apply here too, or this door would be the way around them. The activation
+  // guard is checked only on a real transition INTO ACTIVE: the edit panels
+  // resend the current status on every save, and an unrelated phone-number edit
+  // must not be refused because the account was already ACTIVE.
+  if (status !== undefined) {
+    const validStatuses = ['ACTIVE', 'INACTIVE', 'PENDING'];
+    if (!validStatuses.includes(status))
+      throwError('Invalid status. Must be ACTIVE, INACTIVE or PENDING.', 400);
+
+    if (status === 'ACTIVE' && old.status !== 'ACTIVE' && !old.isPasswordSet)
+      throwError('Cannot activate a guardian who has not completed account setup.', 400);
+
+    updateData.status = status;
+  }
 
   const updated = await Guardian.findOneAndUpdate(
     { guardianId }, { $set: updateData }, { returnDocument: 'after' }
@@ -64,9 +87,10 @@ exports.update = async (guardianId, data) => {
     purpose: 'Modifying guardian details',
     oldValues: {
       name: `${old.firstName} ${old.lastName}`,
-      email: old.email, phone: old.phone, appTheme: old.appTheme
+      email: old.email, phone: old.phone, appTheme: old.appTheme,
+      status: old.status
     },
-    newValues: { firstName, middleName, lastName, email, phone, appTheme }
+    newValues: { firstName, middleName, lastName, email, phone, appTheme, status }
   });
 
   return updated;
