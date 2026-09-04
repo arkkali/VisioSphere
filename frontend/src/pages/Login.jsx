@@ -120,6 +120,11 @@ const Login = () => {
   const API_BASE_URL = import.meta.env.VITE_API_URL;
 
   useEffect(() => {
+    // 2500 ms here used to mean nothing usable appeared for 3.15 s
+    // (2500 + 600 + 50) before the sign-in panel even began its one-second
+    // fade. That is most of the Speed Index Lighthouse marked red, and it is
+    // three seconds of nobody being able to sign in. The splash still plays;
+    // it just no longer holds the page hostage.
     splashTimerRef.current = setTimeout(() => {
       setIsSplashFading(true);
       setTimeout(() => {
@@ -129,8 +134,8 @@ const Login = () => {
             setIsVisible(true);
             setIsAnimatingIn(false); 
         }, 50); 
-      }, 600); 
-    }, 2500);
+      }, 400); 
+    }, 300);
 
     const savedId = localStorage.getItem('visioSphere_savedId');
     const savedPass = localStorage.getItem('visioSphere_savedPass');
@@ -580,8 +585,16 @@ const Login = () => {
     return (
       <>
         <style>{`
+          /* Starts OPAQUE (blurred and small, not invisible) on purpose.
+             Chrome does not count a fully transparent element as a contentful
+             paint, and an opacity transition is composited — it never repaints.
+             Starting at opacity 0 meant the logo painted while invisible, the
+             reveal happened on the GPU without a repaint, and the browser never
+             recorded a First Contentful Paint at all. Lighthouse reported
+             NO_FCP and could not score the page. Blur and scale still carry the
+             entrance; only the invisible first frame is gone. */
           @keyframes blurReveal {
-            0% { filter: blur(20px); opacity: 0; transform: scale(0.8); }
+            0% { filter: blur(20px); opacity: 1; transform: scale(0.8); }
             100% { filter: blur(0px); opacity: 1; transform: scale(1); }
           }
           @keyframes floatingLogo {
@@ -676,7 +689,7 @@ const Login = () => {
         </div>
       )}
 
-      <div className={`relative min-h-screen w-screen overflow-y-auto lg:overflow-hidden bg-[#D8F3FF] flex flex-col lg:flex-row transition-opacity duration-1000 ${isAnimatingIn ? "opacity-0" : isVisible ? "opacity-100" : "opacity-0"} font-['Outfit',sans-serif]`}>
+      <div className={`relative min-h-screen w-screen overflow-y-auto lg:overflow-hidden bg-[#D8F3FF] flex flex-col lg:flex-row transition-opacity duration-300 ${isAnimatingIn ? "opacity-0" : isVisible ? "opacity-100" : "opacity-0"} font-['Outfit',sans-serif]`}>
         
         {loginSuccess && (
           <div className="fixed inset-0 w-screen h-screen bg-[#00212e]/95 backdrop-blur-md z-[9999] flex justify-center items-center [animation:fadeInOverlay_0.4s_ease-out_forwards]">
