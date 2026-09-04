@@ -2,8 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import visioSphereLogo from '../assets/visioSphereLogo.png'; 
-import matandaAnime from '../assets/MatandaAnime.png';
+// WebP, sized for how they are actually drawn. The PNG originals are still in
+// src/assets untouched — the source logo is 4096x2896 and 716 KB, painted here
+// at 150px tall, and Lighthouse charged the whole 716 KB to "Properly size
+// images". Together these two were 999 KB of the login page; they are now 56 KB.
+import visioSphereLogo from '../assets/visioSphereLogo-450.webp';
+import matandaAnime from '../assets/MatandaAnime.webp';
 import { useTheme } from '../context/ThemeContext';
 import { isNurseId, isAdminId, isEmail as isEmailIdentifier } from '../constants/idRoles';
 
@@ -603,7 +607,7 @@ const Login = () => {
           <div className="flex flex-col items-center z-10 [animation:blurReveal_0.8s_cubic-bezier(0.16,1,0.3,1)_forwards]">
             <div className="relative mb-[30px] [animation:floatingLogo_4s_ease-in-out_infinite]">
               <div className="absolute inset-0 bg-[#00a8e8] blur-[40px] opacity-20 rounded-full"></div>
-              <img src={visioSphereLogo} alt="VisioSphere Logo" className="h-[120px] md:h-[150px] w-auto drop-shadow-[0_10px_25px_rgba(0,0,0,0.5)] relative z-10" style={{ filter: 'brightness(0) invert(1)' }} />
+              <img src={visioSphereLogo} alt="VisioSphere Logo" width={636} height={450} className="h-[120px] md:h-[150px] w-auto drop-shadow-[0_10px_25px_rgba(0,0,0,0.5)] relative z-10" style={{ filter: 'brightness(0) invert(1)' }} />
             </div>
 
             <h1 className="text-white text-[42px] md:text-[54px] font-extrabold tracking-tight m-0 drop-shadow-lg relative overflow-hidden pb-[5px]">
@@ -718,9 +722,15 @@ const Login = () => {
             isAnimatingIn ? "opacity-0 -translate-x-12" : isVisible ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-12"
           }`}
         >
+          {/* Intrinsic size declared so the browser reserves the box before the
+              file arrives. Without it the row reflows on load — part of the 15
+              layout shifts Lighthouse counted. w-auto keeps the CSS in charge
+              of the drawn size; these attributes only supply the ratio. */}
           <img
             src={visioSphereLogo}
             alt="VisioSphere Logo"
+            width={636}
+            height={450}
             className="h-[50px] md:h-[65px] w-auto drop-shadow-lg hover:scale-105 transition-transform duration-300 cursor-pointer"
           />
           <span className="text-white text-[26px] md:text-[34px] font-bold -ml-[4px] tracking-wide drop-shadow-md">
@@ -734,9 +744,17 @@ const Login = () => {
               isAnimatingIn ? "opacity-0 translate-y-[40px] scale-95" : isVisible ? "opacity-100 translate-y-0 scale-100 lg:translate-x-[40px]" : "opacity-0 translate-y-[40px] scale-95"
             }`}
           >
+            {/* This is the Largest Contentful Paint element (Lighthouse timed it
+                at 1,650 ms). fetchPriority lifts it out of the low-priority
+                queue images normally start in, so it is requested alongside the
+                CSS rather than after it. */}
             <img
               src={matandaAnime}
               alt="Elderly Care Illustration"
+              width={585}
+              height={562}
+              fetchPriority="high"
+              decoding="async"
               className="w-full h-auto object-contain drop-shadow-[0_20px_40px_rgba(0,33,46,0.15)] [animation:floatImage_6s_ease-in-out_infinite]"
             />
           </div>
