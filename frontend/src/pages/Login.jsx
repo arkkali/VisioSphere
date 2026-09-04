@@ -9,6 +9,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import visioSphereLogo from '../assets/visioSphereLogo-450.webp';
 import matandaAnime from '../assets/MatandaAnime.webp';
 import { useTheme } from '../context/ThemeContext';
+import { AUTH_EVENT } from '../context/AlertContext';
 import { isNurseId, isAdminId, isEmail as isEmailIdentifier } from '../constants/idRoles';
 
 /**
@@ -239,6 +240,10 @@ const Login = () => {
 
         setFailedAttempts(0);
         localStorage.setItem('token', data.token);
+        // Tells AlertProvider a session now exists so it can open the alert
+        // socket. It sits above the router and never remounts, so without
+        // this it would stay disconnected until a full page reload.
+        window.dispatchEvent(new Event(AUTH_EVENT));
         // Facility is read out of the JWT rather than the response body, so the
         // client can never disagree with what the backend enforces. Drives the
         // house dropdowns in constants/houses.js.
@@ -364,6 +369,10 @@ const Login = () => {
         }
 
         localStorage.setItem('token', data.token);
+        // Tells AlertProvider a session now exists so it can open the alert
+        // socket. It sits above the router and never remounts, so without
+        // this it would stay disconnected until a full page reload.
+        window.dispatchEvent(new Event(AUTH_EVENT));
         // Facility is read out of the JWT rather than the response body, so the
         // client can never disagree with what the backend enforces. Drives the
         // house dropdowns in constants/houses.js.

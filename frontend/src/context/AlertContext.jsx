@@ -12,6 +12,17 @@ const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 const MAX_ALERTS = 100;
 const AlertContext = createContext(null);
 
+/**
+ * Fired by the sign-in screen the moment a token lands in localStorage.
+ *
+ * This provider sits ABOVE the router, so it does not remount when Login
+ * navigates to a dashboard — nothing would otherwise tell it that a session
+ * now exists. The browser's own `storage` event is not an option: it fires in
+ * OTHER tabs, never in the one that performed the write, and sign-in happens
+ * in this tab.
+ */
+export const AUTH_EVENT = "visiosphere:auth";
+
 // Ids the user has dismissed, remembered locally.
 //
 // seedAlerts() REPLACES the whole list with whatever /incidents returns, and
@@ -54,7 +65,11 @@ export const AlertProvider = ({ children }) => {
   const attachedRef = useRef(false);
   const dismissedRef = useRef(loadDismissed());
 
-  useEffect(() => {
+  /**
+   * Opens the alert socket. Safe to call repeatedly — the ref guard makes
+   * every call after the first a no-op.
+   */
+  const connect = useCallback(() => {
     if (socketRef.current) return;
     const socket = io(SOCKET_URL, {
       transports: ["polling", "websocket"],
@@ -153,6 +168,28 @@ export const AlertProvider = ({ children }) => {
 
     return () => {};
   }, []);
+
+  /**
+   * CONNECT ONLY WHEN THERE IS A SESSION TO CONNECT WITH.
+   *
+   * This used to fire on mount unconditionally, so every visitor to the
+   * sign-in page opened a socket the backend then refused for having no
+   * token — a request on the critical path that can hang for the better part
+   * of a minute while a sleeping Render instance wakes, and a console error
+   * on the one page that should be cheapest to load.
+   *
+   * Signing in dispatches AUTH_EVENT, which connects immediately. Once
+   * connected, socket.io's own infinite retry (see reconnection settings
+   * above) keeps it alive, and its auth callback re-reads the token on every
+   * attempt, so a refreshed token still works without a reload.
+   */
+  useEffect(() => {
+    if (localStorage.getItem("token")) connect();
+
+    const onAuth = () => connect();
+    window.addEventListener(AUTH_EVENT, onAuth);
+    return () => window.removeEventListener(AUTH_EVENT, onAuth);
+  }, [connect]);
 
   const markAllRead = useCallback(() => {
     setUnreadCount(0);
