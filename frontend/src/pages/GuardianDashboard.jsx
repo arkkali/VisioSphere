@@ -211,6 +211,9 @@ const GuardianDashboard = () => {
       phone: guardian.phone || '',
       gender: guardian.gender || '',
       status: guardian.status || 'PENDING',
+      // Drives the modal's lock: the status field is the system's until the
+      // guardian has set their password.
+      isPasswordSet: !!guardian.isPasswordSet,
     });
     setShowEditModal(true);
   };

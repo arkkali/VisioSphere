@@ -28,7 +28,7 @@ const GuardianTable = ({
   const getStatusClasses = (statusValue) => {
     if (statusValue === 'ACTIVE') return 'border-[#10b981] text-[#10b981] bg-white hover:bg-[#f0fdf4] dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/40';
     if (statusValue === 'INACTIVE') return 'border-[#e11d48] text-[#e11d48] bg-white hover:bg-[#fff1f2] dark:bg-rose-950/30 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-900/40';
-    if (statusValue === 'PENDING') return 'border-[#d97706] text-[#d97706] bg-white hover:bg-[#fffbeb] dark:bg-amber-950/30 dark:border-amber-700/50 dark:text-amber-500 dark:hover:bg-amber-900/40';
+    if (statusValue === 'PENDING') return 'border-[#d97706] text-[#d97706] bg-white dark:bg-amber-950/30 dark:border-amber-700/50 dark:text-amber-500';
     return 'border-[#cbd5e1] text-[#64748b] bg-white dark:bg-slate-800 dark:border-slate-600 dark:text-slate-400';
   };
 
@@ -67,6 +67,13 @@ const GuardianTable = ({
             ) : (
               currentGuardians.map((guardian) => {
                 const statusValue = guardian.status?.toUpperCase() || 'PENDING';
+                // PENDING is the system's to set, not the admin's. Until the
+                // guardian sets their password the account sits at PENDING and
+                // the control is locked; setPassword() then moves it to ACTIVE
+                // by itself and this unlocks as ACTIVE/INACTIVE. The backend
+                // enforces the same rule, so a crafted request cannot get round
+                // a disabled <select>.
+                const setupPending = !guardian.isPasswordSet;
                 const eldersAssigned = guardian.assignedElders?.length > 0
                   ? formatAssignedElders(guardian.assignedElders)
                   : 'None';
@@ -107,17 +114,25 @@ const GuardianTable = ({
                       </span>
                     </td>
                     <td className="p-[16px_20px] align-middle text-center">
-                      <select
-                        value={statusValue}
-                        onChange={(e) => onStatusChange(guardian.guardianId, e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className={`appearance-none cursor-pointer outline-none inline-block px-[12px] py-[4px] border rounded-[6px] text-[0.75rem] font-bold tracking-[0.5px] text-center transition-colors ${getStatusClasses(statusValue)}`}
-                        style={{ textAlignLast: 'center' }}
-                      >
-                        <option value="ACTIVE" className="text-[#00212e] dark:text-white dark:bg-slate-800">ACTIVE</option>
-                        <option value="INACTIVE" className="text-[#00212e] dark:text-white dark:bg-slate-800">INACTIVE</option>
-                        <option value="PENDING" className="text-[#00212e] dark:text-white dark:bg-slate-800">PENDING</option>
-                      </select>
+                      {setupPending ? (
+                        <span
+                          title="Set automatically. This guardian has not set their password yet; the account becomes Active on its own once they do."
+                          className={`inline-block px-[12px] py-[4px] border rounded-[6px] text-[0.75rem] font-bold tracking-[0.5px] text-center ${getStatusClasses('PENDING')}`}
+                        >
+                          PENDING
+                        </span>
+                      ) : (
+                        <select
+                          value={statusValue}
+                          onChange={(e) => onStatusChange(guardian.guardianId, e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`appearance-none cursor-pointer outline-none inline-block px-[12px] py-[4px] border rounded-[6px] text-[0.75rem] font-bold tracking-[0.5px] text-center transition-colors ${getStatusClasses(statusValue)}`}
+                          style={{ textAlignLast: 'center' }}
+                        >
+                          <option value="ACTIVE" className="text-[#00212e] dark:text-white dark:bg-slate-800">ACTIVE</option>
+                          <option value="INACTIVE" className="text-[#00212e] dark:text-white dark:bg-slate-800">INACTIVE</option>
+                        </select>
+                      )}
                     </td>
                     <td className="p-[16px_20px] align-middle text-center">
                       <button
