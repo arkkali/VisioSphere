@@ -112,8 +112,32 @@ guardianSchema.virtual('profileName').get(function () {
   return `${this.firstName || ''} ${this.lastName || ''}`.trim();
 });
 
-guardianSchema.set('toJSON',   { virtuals: true });
-guardianSchema.set('toObject', { virtuals: true });
+/**
+ * An account that has not completed setup reports PENDING — always, to every
+ * client, whatever is stored.
+ *
+ * WHY THIS IS HERE AND NOT IN A SCREEN
+ *
+ * Web and mobile disagreed: the table printed PENDING for a guardian whose
+ * setup was outstanding, while the phone printed INACTIVE for the same person.
+ * Both were reading the same API. The web was deriving the label from
+ * `isPasswordSet` in its own component; the phone was printing the stored
+ * `status`, which still held a value an admin had set before the lock existed.
+ * Two clients, two rules, one field.
+ *
+ * The rule belongs on the way out of the model, so there is exactly one of it.
+ * Internal code still sees the raw `status` — the services below compare
+ * against it — but nothing that leaves this server can contradict Setup Status
+ * again, and a stale value left over from before the lock is masked until
+ * setPassword() overwrites it with ACTIVE.
+ */
+const pendingUntilSetupComplete = (doc, ret) => {
+  if (ret.isPasswordSet === false) ret.status = 'PENDING';
+  return ret;
+};
+
+guardianSchema.set('toJSON',   { virtuals: true, transform: pendingUntilSetupComplete });
+guardianSchema.set('toObject', { virtuals: true, transform: pendingUntilSetupComplete });
 
 // Tenant isolation: adds `facility`, auto-scopes every query, stamps creates.
 // See models/plugins/facilityScope.js.

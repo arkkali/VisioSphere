@@ -65,11 +65,16 @@ exports.update = async (guardianId, data) => {
   // setting up. Until then the system owns it: it is PENDING, and it becomes
   // ACTIVE by itself in guardianAuthService.setPassword().
   //
-  // Compared against the CURRENT value first, because both edit panels resend
-  // the whole profile on every save — a phone-number edit on a PENDING
-  // guardian arrives carrying status: 'PENDING' and must not be refused. Only
-  // a real change is a decision, and only a real change is checked.
-  if (status !== undefined && status !== old.status) {
+  // Compared against the value the CLIENT was shown, not the raw column. Both
+  // edit panels resend the whole profile on every save, and a guardian who has
+  // not finished setting up is shown PENDING (see the toJSON transform in
+  // models/Guardian.js) even where the column still holds something else. A
+  // phone-number edit on that guardian arrives carrying status: 'PENDING' and
+  // must read as "unchanged", not as an attempt to set PENDING. Only a real
+  // change is a decision, and only a real change is checked.
+  const currentStatus = old.isPasswordSet ? old.status : 'PENDING';
+
+  if (status !== undefined && status !== currentStatus) {
     if (!old.isPasswordSet)
       throwError(
         'This guardian has not completed account setup. Account Status stays PENDING until they set their password.',
