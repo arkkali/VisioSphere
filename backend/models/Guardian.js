@@ -26,6 +26,15 @@ const guardianSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Resident'
   }],
+  // Account Status has three values, but only two of them are an admin's to
+  // choose. A guardian is provisioned PENDING and stays PENDING — locked, not
+  // selectable — until they set their password, at which point
+  // setPassword()/resetPassword() move them to ACTIVE automatically. From then
+  // on the admin owns the field and toggles ACTIVE/INACTIVE.
+  //
+  // PENDING is therefore a state the SYSTEM writes and the admin only reads.
+  // The services below refuse any admin-driven status change while
+  // `isPasswordSet` is false, and never accept PENDING as an incoming value.
   status: {
     type: String,
     enum: ['ACTIVE', 'INACTIVE', 'PENDING'],

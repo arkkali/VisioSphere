@@ -61,18 +61,24 @@ exports.update = async (guardianId, data) => {
   // status -- which they wrote straight back into the list. The change looked
   // like it had been saved and had in fact never left this function.
   //
-  // The two rules that guard the dedicated PUT /guardians/:id/status route
-  // apply here too, or this door would be the way around them. The activation
-  // guard is checked only on a real transition INTO ACTIVE: the edit panels
-  // resend the current status on every save, and an unrelated phone-number edit
-  // must not be refused because the account was already ACTIVE.
-  if (status !== undefined) {
-    const validStatuses = ['ACTIVE', 'INACTIVE', 'PENDING'];
-    if (!validStatuses.includes(status))
-      throwError('Invalid status. Must be ACTIVE, INACTIVE or PENDING.', 400);
+  // Account Status is only an admin's to set once the guardian has finished
+  // setting up. Until then the system owns it: it is PENDING, and it becomes
+  // ACTIVE by itself in guardianAuthService.setPassword().
+  //
+  // Compared against the CURRENT value first, because both edit panels resend
+  // the whole profile on every save — a phone-number edit on a PENDING
+  // guardian arrives carrying status: 'PENDING' and must not be refused. Only
+  // a real change is a decision, and only a real change is checked.
+  if (status !== undefined && status !== old.status) {
+    if (!old.isPasswordSet)
+      throwError(
+        'This guardian has not completed account setup. Account Status stays PENDING until they set their password.',
+        400
+      );
 
-    if (status === 'ACTIVE' && old.status !== 'ACTIVE' && !old.isPasswordSet)
-      throwError('Cannot activate a guardian who has not completed account setup.', 400);
+    const validStatuses = ['ACTIVE', 'INACTIVE'];
+    if (!validStatuses.includes(status))
+      throwError('Invalid status. Must be ACTIVE or INACTIVE.', 400);
 
     updateData.status = status;
   }
@@ -104,8 +110,13 @@ exports.updateStatus = async (guardianId, status) => {
   const old = await Guardian.findOne({ guardianId });
   if (!old) throwError('Guardian not found', 404);
 
-  if (!old.isPasswordSet && status === 'ACTIVE')
-    throwError('Cannot activate a guardian who has not completed account setup.', 400);
+  // Locked while setup is outstanding — see the note in update(). PENDING is
+  // written by provisioning and cleared by setPassword(), never by an admin.
+  if (!old.isPasswordSet)
+    throwError(
+      'This guardian has not completed account setup. Account Status stays PENDING until they set their password.',
+      400
+    );
 
   const updated = await Guardian.findOneAndUpdate(
     { guardianId }, { status }, { returnDocument: 'after' }
