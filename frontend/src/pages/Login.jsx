@@ -54,14 +54,14 @@ const LockIcon = () => (
 );
 
 const EyeIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+  <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
     <circle cx="12" cy="12" r="3"></circle>
   </svg>
 );
 
 const EyeOffIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+  <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
     <line x1="1" y1="1" x2="23" y2="23"></line>
   </svg>
@@ -739,7 +739,7 @@ const Login = () => {
           </defs>
         </svg>
 
-        <div
+        <header
           className={`absolute top-[24px] left-[24px] lg:top-[40px] lg:left-[48px] flex items-center z-10 transition-all duration-1000 delay-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
             isAnimatingIn ? "opacity-0 -translate-x-12" : isVisible ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-12"
           }`}
@@ -758,9 +758,9 @@ const Login = () => {
           <span className="text-white text-[26px] md:text-[34px] font-bold -ml-[4px] tracking-wide drop-shadow-md">
             VisioSphere
           </span>
-        </div>
+        </header>
 
-        <div className="flex-none lg:flex-1 flex flex-col justify-center items-center p-[80px_20px_40px] lg:p-[40px] relative z-10 min-h-[40vh] lg:min-h-screen pt-[120px] lg:pt-[40px]">
+        <aside className="flex-none lg:flex-1 flex flex-col justify-center items-center p-[80px_20px_40px] lg:p-[40px] relative z-10 min-h-[40vh] lg:min-h-screen pt-[120px] lg:pt-[40px]">
           <div
             className={`flex flex-col items-center justify-center w-full max-w-[600px] transition-all duration-1000 delay-[400ms] ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
               isAnimatingIn ? "opacity-0 translate-y-[40px] scale-95" : isVisible ? "opacity-100 translate-y-0 scale-100 lg:translate-x-[40px]" : "opacity-0 translate-y-[40px] scale-95"
@@ -780,9 +780,9 @@ const Login = () => {
               className="w-full h-auto object-contain drop-shadow-[0_20px_40px_rgba(0,33,46,0.15)] [animation:floatImage_6s_ease-in-out_infinite]"
             />
           </div>
-        </div>
+        </aside>
 
-        <div className={`flex-1 flex justify-center items-center p-[20px] lg:p-[60px] z-10 relative transition-all duration-1000 delay-[500ms] ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
+        <main className={`flex-1 flex justify-center items-center p-[20px] lg:p-[60px] z-10 relative transition-all duration-1000 delay-[500ms] ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
             isAnimatingIn ? "opacity-0 translate-x-[40px]" : isVisible ? "opacity-100 translate-x-0" : "opacity-0 translate-x-[40px]"
           }`}
         >
@@ -790,7 +790,7 @@ const Login = () => {
             {currentView === 'login' && (
               <div className="[animation:fadeInPanel_0.4s_ease-out_forwards]">
                 <div className="[animation:fadeSlideIn_0.4s_ease-out_forwards]">
-                  <h2 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">System Login</h2>
+                  <h1 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">System Login</h1>
                   <p className="text-[#64748b] text-[15px] m-0 mb-[35px] font-medium leading-relaxed">Secure access to your care management dashboard.</p>
                   
                   {error && <div className="text-[#e74c3c] bg-[#e74c3c]/10 p-[14px] rounded-xl text-[14px] mb-[25px] font-medium leading-[1.4] border border-[#e74c3c]/20 [animation:scaleIn_0.2s_ease-out]">{error}</div>}
@@ -838,10 +838,22 @@ const Login = () => {
                           disabled={loading || lockoutTimer > 0}
                           required 
                         />
+                        {/* The ONLY audit Lighthouse failed on this page: an icon-only button has
+                              no text node, so its accessible name was empty and a screen
+                              reader announced it as just "button". The label states the
+                              ACTION (what the click does), and aria-pressed carries the
+                              current state, so the two are not fighting each other.
+
+                              tabIndex="-1" was removed with it. It took this control out of
+                              the tab order entirely, which meant a keyboard-only user could
+                              never reveal what they had typed — WCAG 2.1.1 (Level A). No
+                              automated audit catches that; it is one of the ten items
+                              Lighthouse lists as "manually check". */}
                         <button 
                           type="button" 
                           onClick={() => setShowLoginPassword(!showLoginPassword)}
-                          tabIndex="-1"
+                          aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                          aria-pressed={showLoginPassword}
                           disabled={loading || lockoutTimer > 0}
                           className="absolute right-[16px] bg-none border-none text-[#94a3b8] hover:text-[#475569] flex items-center justify-center p-0 transition-all duration-200 z-10 hover:scale-110 active:scale-95"
                           style={{
@@ -913,7 +925,7 @@ const Login = () => {
                   <button type="button" className="text-[#64748b] hover:text-primary-blue bg-none border-none text-[14px] font-bold cursor-pointer p-[5px] transition-all duration-200 hover:-translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed" onClick={() => switchView('first-time')} disabled={loading}>
                     Account Setup
                   </button>
-                  <span className="text-[#cbd5e1] select-none text-[10px]">●</span>
+                  <span aria-hidden="true" className="text-[#cbd5e1] select-none text-[10px]">●</span>
                   <button type="button" className="text-[#64748b] hover:text-primary-blue bg-none border-none text-[14px] font-bold cursor-pointer p-[5px] transition-all duration-200 hover:-translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed" onClick={() => switchView('troubles')} disabled={loading}>
                     Recovery & Help
                   </button>
@@ -923,7 +935,7 @@ const Login = () => {
 
             {currentView === '2fa' && (
               <div className="[animation:fadeInPanel_0.4s_ease-out_forwards]">
-                <h2 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">Security Check</h2>
+                <h1 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">Security Check</h1>
                 <p className="text-[#64748b] text-[15px] m-0 mb-[35px] font-medium leading-relaxed">Enter your secure PIN to continue.</p>
                 {error && <div className="text-[#e74c3c] bg-[#e74c3c]/10 p-[14px] rounded-xl text-[14px] mb-[25px] font-medium leading-[1.4] border border-[#e74c3c]/20 [animation:scaleIn_0.2s_ease-out]">{error}</div>}
                 
@@ -948,7 +960,8 @@ const Login = () => {
                       <button 
                         type="button" 
                         onClick={() => setShowLoginPassword(!showLoginPassword)}
-                        tabIndex="-1"
+                        aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                        aria-pressed={showLoginPassword}
                         className="absolute right-[16px] bg-none border-none text-[#94a3b8] hover:text-[#475569] flex items-center justify-center p-0 cursor-pointer z-10 transition-all duration-200 hover:scale-110 active:scale-95"
                       >
                         {showLoginPassword ? <EyeOffIcon /> : <EyeIcon />}
@@ -968,7 +981,7 @@ const Login = () => {
 
             {currentView === 'troubles' && (
               <div className="[animation:fadeInPanel_0.4s_ease-out_forwards]">
-                <h2 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">Having Troubles?</h2>
+                <h1 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">Having Troubles?</h1>
                 <p className="text-[#64748b] text-[15px] m-0 mb-[35px] font-medium leading-relaxed">Select an option below to recover your account or find help.</p>
                 <div className="flex flex-col gap-[16px] mt-[25px]">
                   <button className="w-full p-[16px] bg-[#f8fafc] text-[#0f172a] border border-[#cbd5e1] rounded-xl cursor-pointer text-[15px] font-bold transition-all duration-300 hover:not(:disabled):bg-white hover:not(:disabled):border-primary-blue hover:not(:disabled):text-primary-blue hover:not(:disabled):shadow-lg hover:not(:disabled):-translate-y-[2px] active:not(:disabled):scale-[0.98] shadow-sm" onClick={() => switchView('forgot-password')}>Reset Password</button>
@@ -982,7 +995,7 @@ const Login = () => {
 
             {(currentView === 'first-time' || currentView === 'forgot-password') && (
               <div className="[animation:fadeInPanel_0.4s_ease-out_forwards]">
-                <h2 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">{currentView === 'first-time' ? 'Account Setup' : 'Reset Password'}</h2>
+                <h1 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">{currentView === 'first-time' ? 'Account Setup' : 'Reset Password'}</h1>
                 <p className="text-[#64748b] text-[15px] m-0 mb-[35px] font-medium leading-relaxed">
                   {otpStep === 'request' && 'Enter your registered email address and role to receive a verification code.'}
                   {otpStep === 'verify' && 'Enter the 6-digit secure code sent to your email.'}
@@ -993,8 +1006,16 @@ const Login = () => {
                 {otpStep === 'request' && (
                   <form onSubmit={handleRequestOTP}>
                     <div className="mb-[20px] text-left group relative">
-                      <label className="block mb-[10px] text-[#475569] font-bold text-[12px] tracking-[0.08em] uppercase transition-colors group-focus-within:text-primary-blue">Account Type</label>
+                      {/* htmlFor/id, not just proximity. Every other field on this
+                          page gets an accessible name from its `placeholder` —
+                          a fallback axe tolerates but WCAG does not love, since
+                          the name vanishes the moment you type. A <select> has
+                          no placeholder to fall back on, so this label was
+                          decoration only and the control announced as an
+                          unnamed combo box. */}
+                      <label htmlFor="recovery-role" className="block mb-[10px] text-[#475569] font-bold text-[12px] tracking-[0.08em] uppercase transition-colors group-focus-within:text-primary-blue">Account Type</label>
                       <select 
+                        id="recovery-role"
                         className="w-full p-[14px_18px] border border-[#cbd5e1] rounded-xl text-[15px] transition-all duration-300 bg-[#f8fafc] text-[#0f172a] focus:outline-none focus:border-primary-blue focus:bg-white focus:ring-[4px] focus:ring-[#00a8e8]/15 focus:scale-[1.01] font-bold shadow-sm hover:border-[#94a3b8] cursor-pointer"
                         value={recoveryRole}
                         onChange={(e) => setRecoveryRole(e.target.value)}
@@ -1084,7 +1105,7 @@ const Login = () => {
                           <LockIcon />
                         </div>
                         <input type={showNewPassword ? "text" : "password"} autoComplete="off" className="w-full p-[14px_48px_14px_48px] border border-[#cbd5e1] rounded-xl text-[15px] transition-all duration-300 bg-[#f8fafc] text-[#0f172a] placeholder:text-[#94a3b8] focus:outline-none focus:border-primary-blue focus:bg-white focus:ring-[4px] focus:ring-[#00a8e8]/15 focus:scale-[1.01] disabled:bg-[#f1f5f9] disabled:text-[#94a3b8] disabled:cursor-not-allowed box-border font-medium shadow-sm hover:border-[#94a3b8]" placeholder="Enter new password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required />
-                        <button type="button" className="absolute right-[16px] bg-none border-none text-[#94a3b8] hover:text-[#475569] flex items-center justify-center p-0 cursor-pointer z-10 transition-all duration-200 hover:scale-110 active:scale-95" onClick={() => setShowNewPassword(!showNewPassword)} tabIndex="-1">
+                        <button type="button" className="absolute right-[16px] bg-none border-none text-[#94a3b8] hover:text-[#475569] flex items-center justify-center p-0 cursor-pointer z-10 transition-all duration-200 hover:scale-110 active:scale-95" onClick={() => setShowNewPassword(!showNewPassword)} aria-label={showNewPassword ? 'Hide new password' : 'Show new password'} aria-pressed={showNewPassword}>
                           {showNewPassword ? <EyeOffIcon /> : <EyeIcon />}
                         </button>
                       </div>
@@ -1119,7 +1140,7 @@ const Login = () => {
                     <polyline points="20 6 9 17 4 12"></polyline>
                   </svg>
                 </div>
-                <h2 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[12px] tracking-tight">Success!</h2>
+                <h1 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[12px] tracking-tight">Success!</h1>
                 <p className="text-[#64748b] text-[15px] m-0 mb-[35px] font-medium leading-relaxed">Your account has been secured. Returning to login screen...</p>
                 <div className="w-full h-[6px] bg-[#f1f5f9] rounded-full overflow-hidden mt-[20px]">
                   <div className="w-full h-full bg-gradient-to-r from-primary-blue to-[#0089bd] rounded-full [animation:shrinkBar_3s_linear_forwards]"></div>
@@ -1129,7 +1150,7 @@ const Login = () => {
 
             {currentView === 'faqs' && (
               <div className="[animation:fadeInPanel_0.4s_ease-out_forwards]">
-                <h2 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">Support FAQs</h2>
+                <h1 className="text-[#00212e] text-[30px] font-extrabold m-0 mb-[10px] tracking-tight">Support FAQs</h1>
                 <div className="mt-[25px] text-[14px] text-[#334155] leading-relaxed text-left space-y-[16px]">
                   <div className="bg-[#f8fafc] p-[20px] rounded-xl border border-[#cbd5e1] shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary-blue/30 hover:-translate-y-[2px]">
                     <strong className="text-[#0f172a] block mb-[6px] text-[15px] font-bold">How do I request an account?</strong>
@@ -1146,7 +1167,7 @@ const Login = () => {
               </div>
             )}
           </div>
-        </div>
+        </main>
       </div>
     </>
   );
