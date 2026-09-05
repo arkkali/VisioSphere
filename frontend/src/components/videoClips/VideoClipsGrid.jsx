@@ -27,7 +27,7 @@ const VideoClipsGrid = ({
         <h2 className="m-0 text-[0.9rem] font-black text-[#00212e] dark:text-white">
           {houseName}
         </h2>
-        <span className="text-[0.72rem] font-semibold text-[#9dabb1] dark:text-[#668894]">
+        <span className="text-[0.72rem] font-semibold text-[#9dabb1] dark:text-[#8fb0bc]">
           {clips.length}
         </span>
       </div>

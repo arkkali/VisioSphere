@@ -82,7 +82,7 @@ const EditClipModal = ({ clip, onClose, onSave }) => {
                 <option key={type} value={type}>{type}</option>
               ))}
             </select>
-            <p className="m-0 mt-1.5 text-[0.68rem] text-[#9dabb1] dark:text-[#668894] font-medium">
+            <p className="m-0 mt-1.5 text-[0.68rem] text-[#9dabb1] dark:text-[#8fb0bc] font-medium">
               Changing this updates the event's severity and the dashboard
               totals. The recording itself is not modified.
             </p>
@@ -102,9 +102,9 @@ const EditClipModal = ({ clip, onClose, onSave }) => {
               rows={3}
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g. Resident sat down heavily, no fall occurred."
-              className="w-full py-[10px] px-3 rounded-[12px] border border-[#e2e8f0] dark:border-[#00435c] bg-white dark:bg-[#00344a] text-[0.82rem] font-medium text-[#00212e] dark:text-white placeholder:text-[#9dabb1] dark:placeholder:text-[#668894] outline-none focus:border-[#00a8e8] transition-colors resize-none"
+              className="w-full py-[10px] px-3 rounded-[12px] border border-[#e2e8f0] dark:border-[#00435c] bg-white dark:bg-[#00344a] text-[0.82rem] font-medium text-[#00212e] dark:text-white placeholder:text-[#9dabb1] dark:placeholder:text-[#8fb0bc] outline-none focus:border-[#00a8e8] transition-colors resize-none"
             />
-            <p className="m-0 mt-1 text-[0.68rem] text-[#9dabb1] dark:text-[#668894] font-medium text-right">
+            <p className="m-0 mt-1 text-[0.68rem] text-[#9dabb1] dark:text-[#8fb0bc] font-medium text-right">
               {note.length}/{NOTE_LIMIT}
             </p>
           </div>
@@ -115,7 +115,7 @@ const EditClipModal = ({ clip, onClose, onSave }) => {
             </div>
           )}
 
-          <p className="m-0 text-[0.68rem] text-[#9dabb1] dark:text-[#668894] font-medium">
+          <p className="m-0 text-[0.68rem] text-[#9dabb1] dark:text-[#8fb0bc] font-medium">
             This change is recorded in the audit trail with your name and the
             previous values.
           </p>

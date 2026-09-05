@@ -197,7 +197,13 @@ const Sidebar = () => {
             )}
           </NavLink>
 
-          <button className="flex items-center justify-center gap-[10px] bg-[#38bdf8] dark:bg-[#0284c7] text-white border-none p-[12px] rounded-[24px] font-bold text-[0.95rem] cursor-pointer mt-[15px] transition-all duration-200 shadow-[0_4px_10px_rgba(56,189,248,0.3)] dark:shadow-[0_4px_10px_rgba(2,132,199,0.4)] w-full hover:bg-[#0284c7] dark:hover:bg-[#0369a1] hover:-translate-y-[2px] hover:shadow-[0_6px_14px_rgba(2,132,199,0.3)] active:translate-y-0" onClick={handleSignOut}>
+          {/* White on #38bdf8 measured 2.14:1 — the worst contrast failure on the
+              dashboard, on the one control nobody can afford to misread. Darkened
+              to #0075a2 (5.16:1), a blue already used elsewhere in this app, so
+              white text stays. Dark mode: #0369a1 (5.93:1). Hover deepens further
+              rather than lightening, which is what broke it before — the old
+              hover:bg-[#0284c7] was 4.10:1, still short. */}
+          <button className="flex items-center justify-center gap-[10px] bg-[#0075a2] dark:bg-[#0369a1] text-white border-none p-[12px] rounded-[24px] font-bold text-[0.95rem] cursor-pointer mt-[15px] transition-all duration-200 shadow-[0_4px_10px_rgba(0,117,162,0.3)] dark:shadow-[0_4px_10px_rgba(3,105,161,0.4)] w-full hover:bg-[#00688f] dark:hover:bg-[#025c8f] hover:-translate-y-[2px] hover:shadow-[0_6px_14px_rgba(0,104,143,0.35)] active:translate-y-0" onClick={handleSignOut}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
               <polyline points="16 17 21 12 16 7"></polyline>

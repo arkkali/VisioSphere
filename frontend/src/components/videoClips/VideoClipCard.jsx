@@ -142,7 +142,7 @@ const VideoClipCard = ({
               {clip.note}
             </p>
           ) : (
-            <p className="m-0 mt-0.5 text-[0.68rem] font-semibold text-[#9dabb1] dark:text-[#668894] truncate">
+            <p className="m-0 mt-0.5 text-[0.68rem] font-semibold text-[#9dabb1] dark:text-[#8fb0bc] truncate">
               {clip.cameraName}
             </p>
           )}
@@ -156,7 +156,7 @@ const VideoClipCard = ({
             <button
               onClick={() => setMenuOpen((v) => !v)}
               aria-label="Clip actions"
-              className="w-[24px] h-[24px] flex items-center justify-center rounded-md text-[#9dabb1] dark:text-[#668894] hover:bg-[#f1f5f9] dark:hover:bg-[#00435c] hover:text-[#00a8e8] transition-colors"
+              className="w-[24px] h-[24px] flex items-center justify-center rounded-md text-[#9dabb1] dark:text-[#8fb0bc] hover:bg-[#f1f5f9] dark:hover:bg-[#00435c] hover:text-[#00a8e8] transition-colors"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                 <circle cx="5" cy="12" r="2" />

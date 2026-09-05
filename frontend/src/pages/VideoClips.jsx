@@ -121,7 +121,7 @@ const VideoClips = () => {
             <h1 className="text-[1.4rem] text-[#00212e] dark:text-white m-0 font-black tracking-tight leading-none">
               Video Clips
             </h1>
-            <p className="text-[0.8rem] text-[#5a6265] dark:text-[#668894] font-semibold m-0 mt-1.5 leading-none">
+            <p className="text-[0.8rem] text-[#5a6265] dark:text-[#8fb0bc] font-semibold m-0 mt-1.5 leading-none">
               Review and analyze detected events from your cameras.
             </p>
 
@@ -173,7 +173,7 @@ const VideoClips = () => {
                 <p className="m-0 font-bold text-[#00212e] dark:text-white text-sm">
                   No clips found
                 </p>
-                <p className="m-0 mt-1 text-xs text-[#5a6265] dark:text-[#668894] font-medium">
+                <p className="m-0 mt-1 text-xs text-[#5a6265] dark:text-[#8fb0bc] font-medium">
                   Try adjusting your filters or search.
                 </p>
               </div>

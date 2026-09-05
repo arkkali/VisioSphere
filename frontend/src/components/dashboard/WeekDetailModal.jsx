@@ -89,13 +89,13 @@ const WeekDetailModal = ({ selectedWeek, selectedWeekData, selectedWeekLoading, 
                       dataKey="name"
                       axisLine={false}
                       tickLine={false}
-                      tick={{ fill: isDark ? '#668894' : '#649ca7', fontSize: 13, fontWeight: 700 }}
+                      tick={{ fill: isDark ? '#8fb0bc' : '#649ca7', fontSize: 13, fontWeight: 700 }}
                       dy={8}
                     />
                     <YAxis
                       axisLine={false}
                       tickLine={false}
-                      tick={{ fill: isDark ? '#668894' : '#649ca7', fontSize: 13, fontWeight: 700 }}
+                      tick={{ fill: isDark ? '#8fb0bc' : '#649ca7', fontSize: 13, fontWeight: 700 }}
                       allowDecimals={false}
                       domain={[0, (dataMax) => Math.max(3, Math.ceil(dataMax * 1.2))]}
                     />

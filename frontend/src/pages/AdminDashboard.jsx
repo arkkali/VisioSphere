@@ -516,9 +516,9 @@ const AdminDashboard = () => {
             <div className="flex items-center gap-3">
               <div>
                 <h1 className="text-[1.15rem] text-[#00212e] dark:text-white m-0 font-black tracking-tight leading-none flex items-center gap-1.5">
-                  Welcome back, <span className="text-[#00a8e8]">{adminProfile.name.split(' ')[0]}</span>
+                  Welcome back, <span className="text-[#0075a2] dark:text-[#4cc2ee]">{adminProfile.name.split(' ')[0]}</span>
                 </h1>
-                <p className="text-[0.75rem] text-[#5a6265] dark:text-[#668894] font-semibold m-0 mt-0.5 leading-none">
+                <p className="text-[0.75rem] text-[#5a6265] dark:text-[#8fb0bc] font-semibold m-0 mt-0.5 leading-none">
                   {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                 </p>
               </div>
@@ -526,7 +526,18 @@ const AdminDashboard = () => {
 
             <div className="flex items-center gap-2.5">
               <div className="relative" ref={bellRef}>
+                {/* Lighthouse: "Buttons do not have an accessible name". The bell
+                    is an <svg> and a count badge — no text node — so this
+                    announced as "button" and nothing else. The count belongs IN
+                    the name: a screen reader user gets "Notifications, 3 unread"
+                    without having to open the panel to find out. aria-expanded
+                    reports whether that panel is currently open. */}
                 <button onClick={handleBellClick}
+                  type="button"
+                  aria-label={unreadCount > 0
+                    ? `Notifications, ${unreadCount} unread`
+                    : 'Notifications, none unread'}
+                  aria-expanded={showNotifications}
                   className="relative w-[38px] h-[38px] bg-[#eaf8fe] dark:bg-[#0075a2] rounded-full border-none flex items-center justify-center cursor-pointer shadow-sm transition-transform hover:scale-105 active:scale-95">
                   <svg width="17" height="17" viewBox="0 0 24 24"
                     fill={unreadCount > 0 ? '#00a8e8' : 'none'}
@@ -536,7 +547,7 @@ const AdminDashboard = () => {
                     <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                   </svg>
                   {unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-[#ff4757] text-white text-[9px] font-bold min-w-[17px] h-[17px] flex items-center justify-center rounded-full border-2 border-white dark:border-[#00212e]">
+                    <span aria-hidden="true" className="absolute -top-1 -right-1 bg-[#ff4757] text-white text-[9px] font-bold min-w-[17px] h-[17px] flex items-center justify-center rounded-full border-2 border-white dark:border-[#00212e]">
                       {unreadCount > 9 ? '9+' : unreadCount}
                     </span>
                   )}
@@ -553,7 +564,7 @@ const AdminDashboard = () => {
                     </div>
                     <div className="max-h-[26rem] overflow-y-auto custom-scrollbar">
                       {notifications.length === 0 ? (
-                        <p className="text-center text-sm text-[#9dabb1] dark:text-[#668894] py-8 m-0 font-medium">No alerts yet.</p>
+                        <p className="text-center text-sm text-[#9dabb1] dark:text-[#8fb0bc] py-8 m-0 font-medium">No alerts yet.</p>
                       ) : (
                         notifications.map((n, i) => (
                           <div key={`${n._id}-${i}`} className="p-3.5 border-b border-[#f3fbfe] dark:border-[#00435c]/50 hover:bg-[#f9fdfe] dark:hover:bg-[#00435c]">
@@ -587,7 +598,7 @@ const AdminDashboard = () => {
                 </div>
                 <div className="hidden lg:block">
                   <p className="m-0 font-black text-[0.8rem] text-[#00212e] dark:text-white leading-none">{adminProfile.name.split(' ')[0]}</p>
-                  <p className="m-0 text-[0.7rem] text-[#5a6265] dark:text-[#668894] font-semibold mt-0.5 leading-none">{adminProfile.role}</p>
+                  <p className="m-0 text-[0.7rem] text-[#5a6265] dark:text-[#8fb0bc] font-semibold mt-0.5 leading-none">{adminProfile.role}</p>
                 </div>
               </div>
             </div>

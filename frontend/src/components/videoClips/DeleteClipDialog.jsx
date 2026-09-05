@@ -122,7 +122,7 @@ const DeleteClipDialog = ({ clips, onClose, onConfirm }) => {
         </div>
 
         {deleting && (
-          <p className="m-0 px-5 pb-1 text-[0.68rem] text-[#9dabb1] dark:text-[#668894] font-medium">
+          <p className="m-0 px-5 pb-1 text-[0.68rem] text-[#9dabb1] dark:text-[#8fb0bc] font-medium">
             Stopping will not restore recordings already deleted.
           </p>
         )}

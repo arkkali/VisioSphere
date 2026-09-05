@@ -20,7 +20,7 @@ const VideoClipsToolbar = ({
     <div className="flex items-center gap-2.5 flex-wrap">
       <div className="relative flex-1 min-w-[220px]">
         <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9dabb1] dark:text-[#668894]"
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9dabb1] dark:text-[#8fb0bc]"
           viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
           strokeLinecap="round" strokeLinejoin="round"
         >
@@ -32,7 +32,7 @@ const VideoClipsToolbar = ({
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search by event, location or camera..."
-          className="w-full py-[10px] pl-9 pr-3 rounded-[12px] border border-[#e2e8f0] dark:border-[#00435c] bg-white dark:bg-[#00212e] text-[0.82rem] font-medium text-[#00212e] dark:text-white placeholder:text-[#9dabb1] dark:placeholder:text-[#668894] outline-none focus:border-[#00a8e8] transition-colors"
+          className="w-full py-[10px] pl-9 pr-3 rounded-[12px] border border-[#e2e8f0] dark:border-[#00435c] bg-white dark:bg-[#00212e] text-[0.82rem] font-medium text-[#00212e] dark:text-white placeholder:text-[#9dabb1] dark:placeholder:text-[#8fb0bc] outline-none focus:border-[#00a8e8] transition-colors"
         />
       </div>
 
@@ -60,7 +60,7 @@ const VideoClipsToolbar = ({
           ))}
         </select>
         <svg
-          className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9dabb1] dark:text-[#668894] pointer-events-none"
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9dabb1] dark:text-[#8fb0bc] pointer-events-none"
           viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
           strokeLinecap="round" strokeLinejoin="round"
         >

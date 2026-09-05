@@ -1,3 +1,28 @@
+// CONTRAST TOKENS — every value below is measured, not eyeballed.
+//
+// Lighthouse failed this page on "Background and foreground colors do not have
+// a sufficient contrast ratio". Eight of the ten flagged nodes were this one
+// component, repeated across the four stat cards:
+//
+//   card title   #94a3b8 on #ffffff = 2.56:1  ->  #64748b = 4.76:1
+//   neutral badge #64748b on #f1f5f9 = 4.34:1 ->  #475569 = 6.92:1
+//
+// Both are small bold text (10-12px), so WCAG AA asks for 4.5:1, not the 3:1
+// that applies to large text. 4.34 missing by 0.16 is still a fail.
+//
+// The dark variants were failing too, just below the audit's reach because the
+// run was in light mode:
+//   card title   #668894 on #00212e = 4.39:1  ->  #8fb0bc = 7.24:1
+//   neutral badge #94a3b8 on #00435c = 4.18:1 ->  #a8b6c6 = 5.20:1
+//
+// The up/down badges already passed (4.57 and 5.72) and are left alone.
+//
+// #668894 turned out to be a SHARED dark-mode muted token, used in ~24 places
+// across the dashboard, charts and Video Clips — it failed on every dark
+// surface it sits on (#00212e 4.39, #00344a 3.47, #00435c 2.82), so it was
+// replaced app-wide rather than patched here. #8fb0bc is the value that clears
+// 4.5:1 on all three (7.24 / 5.73 / 4.65).
+
 import React from 'react';
 
 const ArrowUp = () => (
@@ -25,7 +50,7 @@ const StatBadge = ({ statData, compact }) => {
 
   if (direction === 'none') {
     return (
-      <div className={`flex items-center gap-0.5 px-2 py-0.5 rounded-full font-bold tracking-wide whitespace-nowrap bg-[#f1f5f9] text-[#64748b] dark:bg-[#00435c] dark:text-[#94a3b8] ${
+      <div className={`flex items-center gap-0.5 px-2 py-0.5 rounded-full font-bold tracking-wide whitespace-nowrap bg-[#f1f5f9] text-[#475569] dark:bg-[#00435c] dark:text-[#a8b6c6] ${
         compact ? 'text-[0.6rem]' : 'text-[0.72rem]'
       }`}>
         <span>{online} / {total} online</span>
@@ -45,7 +70,7 @@ const StatBadge = ({ statData, compact }) => {
         ? 'bg-[#dcfce7] text-[#15803d] dark:bg-[#15803d]/20 dark:text-[#4ade80]'
         : isDown
           ? 'bg-[#fff1f2] text-[#be123c] dark:bg-[#be123c]/20 dark:text-[#fb7185]'
-          : 'bg-[#f1f5f9] text-[#64748b] dark:bg-[#00435c] dark:text-[#94a3b8]'
+          : 'bg-[#f1f5f9] text-[#475569] dark:bg-[#00435c] dark:text-[#a8b6c6]'
     }`}>
       {isUp      && <ArrowUp />}
       {isDown    && <ArrowDown />}
@@ -69,7 +94,7 @@ const BentoStatCard = ({ title, value, icon, statData, isDark, primaryColor, bgC
         </div>
         <div>
           <p className={`font-bold text-[0.65rem] uppercase tracking-widest m-0 mb-1 leading-none ${
-            isDark ? 'text-[#668894]' : 'text-[#94a3b8]'
+            isDark ? 'text-[#8fb0bc]' : 'text-[#64748b]'
           }`}>
             {title}
           </p>
@@ -95,7 +120,7 @@ const BentoStatCard = ({ title, value, icon, statData, isDark, primaryColor, bgC
       </div>
       <div>
         <p className={`font-bold text-[0.75rem] uppercase tracking-widest m-0 mb-1.5 ${
-          isDark ? 'text-[#668894]' : 'text-[#94a3b8]'
+          isDark ? 'text-[#8fb0bc]' : 'text-[#64748b]'
         }`}>
           {title}
         </p>

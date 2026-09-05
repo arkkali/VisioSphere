@@ -50,7 +50,7 @@ const AlertsChartWidget = ({ data, onOpenHistory, isDark }) => {
               <h3 className="m-0 text-[#00212e] dark:text-white text-[0.95rem] font-black tracking-tight leading-none">
                 7-Day Alert History
               </h3>
-              <p className="m-0 mt-0.5 text-[0.7rem] text-[#5a6265] dark:text-[#668894] font-semibold leading-none">
+              <p className="m-0 mt-0.5 text-[0.7rem] text-[#5a6265] dark:text-[#8fb0bc] font-semibold leading-none">
                 Current week · Sun – Sat
               </p>
             </div>
@@ -60,12 +60,12 @@ const AlertsChartWidget = ({ data, onOpenHistory, isDark }) => {
             <div className="hidden sm:flex items-center gap-3 mr-1">
               <div className="text-right">
                 <p className="m-0 text-[1.4rem] font-black text-[#00212e] dark:text-white leading-none">{weeklyTotal}</p>
-                <p className="m-0 text-[0.65rem] font-bold text-[#5a6265] dark:text-[#668894] uppercase tracking-wider leading-none mt-0.5">This Week</p>
+                <p className="m-0 text-[0.65rem] font-bold text-[#5a6265] dark:text-[#8fb0bc] uppercase tracking-wider leading-none mt-0.5">This Week</p>
               </div>
               {peakDay.alerts > 0 && (
                 <div className="text-right border-l border-[#e2e8f0] dark:border-[#00435c] pl-3">
                   <p className="m-0 text-[1.4rem] font-black text-[#00a8e8] leading-none">{peakDay.name}</p>
-                  <p className="m-0 text-[0.65rem] font-bold text-[#5a6265] dark:text-[#668894] uppercase tracking-wider leading-none mt-0.5">Peak Day</p>
+                  <p className="m-0 text-[0.65rem] font-bold text-[#5a6265] dark:text-[#8fb0bc] uppercase tracking-wider leading-none mt-0.5">Peak Day</p>
                 </div>
               )}
             </div>
@@ -117,13 +117,13 @@ const AlertsChartWidget = ({ data, onOpenHistory, isDark }) => {
               dataKey="name"
               axisLine={false}
               tickLine={false}
-              tick={{ fill: isDark ? '#668894' : '#94a3b8', fontSize: 11, fontWeight: 700 }}
+              tick={{ fill: isDark ? '#8fb0bc' : '#64748b', fontSize: 11, fontWeight: 700 }}
               dy={8}
             />
             <YAxis
               axisLine={false}
               tickLine={false}
-              tick={{ fill: isDark ? '#668894' : '#94a3b8', fontSize: 11, fontWeight: 700 }}
+              tick={{ fill: isDark ? '#8fb0bc' : '#64748b', fontSize: 11, fontWeight: 700 }}
               allowDecimals={false}
               domain={[0, (dataMax) => Math.max(3, Math.ceil(dataMax * 1.2))]}
             />
