@@ -303,7 +303,7 @@ const NursePage = () => {
                 <p className="text-[#2E3A59] dark:text-slate-400 text-[0.95rem] m-0 mt-[4px] font-medium">Provision and manage medical staff accounts.</p>
               </div>
               <button
-                className="w-full md:w-auto flex items-center justify-center gap-[8px] bg-[#0075a2] dark:bg-[#0369a1] text-white border-none p-[12px_24px] rounded-[8px] font-bold cursor-pointer transition-all duration-300 text-[0.95rem] shadow-[0_4px_12px_rgba(0,168,232,0.25)] dark:shadow-[0_4px_12px_rgba(2,132,199,0.4)] hover:bg-[#00688f] dark:hover:bg-[#025c8f] hover:shadow-[0_6px_16px_rgba(0,117,162,0.35)] dark:hover:shadow-[0_6px_16px_rgba(2,132,199,0.5)] hover:-translate-y-[2px]"
+                className="w-full md:w-auto flex items-center justify-center gap-[8px] bg-[#00a8e8] dark:bg-[#0284c7] text-white border-none p-[12px_24px] rounded-[8px] font-bold cursor-pointer transition-all duration-300 text-[0.95rem] shadow-[0_4px_12px_rgba(0,168,232,0.25)] dark:shadow-[0_4px_12px_rgba(2,132,199,0.4)] hover:bg-[#0075a2] dark:hover:bg-[#0369a1] hover:shadow-[0_6px_16px_rgba(0,168,232,0.35)] dark:hover:shadow-[0_6px_16px_rgba(2,132,199,0.5)] hover:-translate-y-[2px]"
                 onClick={() => setShowAddModal(true)}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-[18px] h-[18px]">
@@ -372,13 +372,13 @@ const NursePage = () => {
 
               <div className="w-full lg:w-auto flex gap-[8px] flex-wrap justify-between lg:justify-start">
                 <button
-                  className={`p-[10px_16px] border rounded-[6px] font-bold text-[0.8rem] tracking-[0.5px] cursor-pointer transition-colors duration-200 whitespace-nowrap uppercase ${sortOrder === 'asc' ? 'bg-[#0075a2] dark:bg-[#0369a1] text-white border-[#0075a2] dark:border-[#0369a1]' : 'bg-white dark:bg-slate-800 text-[#2E3A59] dark:text-slate-300 border-[#E5E7EB] dark:border-slate-600 hover:border-[#00a8e8] dark:hover:border-[#38bdf8] hover:text-[#00a8e8] dark:hover:text-[#38bdf8]'}`}
+                  className={`p-[10px_16px] border rounded-[6px] font-bold text-[0.8rem] tracking-[0.5px] cursor-pointer transition-colors duration-200 whitespace-nowrap uppercase ${sortOrder === 'asc' ? 'bg-[#00a8e8] dark:bg-[#0284c7] text-white border-[#00a8e8] dark:border-[#0284c7]' : 'bg-white dark:bg-slate-800 text-[#2E3A59] dark:text-slate-300 border-[#E5E7EB] dark:border-slate-600 hover:border-[#00a8e8] dark:hover:border-[#38bdf8] hover:text-[#00a8e8] dark:hover:text-[#38bdf8]'}`}
                   onClick={() => setSortOrder(sortOrder === 'asc' ? 'default' : 'asc')}
                 >
                   A-Z ↓
                 </button>
                 <button
-                  className={`p-[10px_16px] border rounded-[6px] font-bold text-[0.8rem] tracking-[0.5px] cursor-pointer transition-colors duration-200 whitespace-nowrap uppercase ${sortOrder === 'desc' ? 'bg-[#0075a2] dark:bg-[#0369a1] text-white border-[#0075a2] dark:border-[#0369a1]' : 'bg-white dark:bg-slate-800 text-[#2E3A59] dark:text-slate-300 border-[#E5E7EB] dark:border-slate-600 hover:border-[#00a8e8] dark:hover:border-[#38bdf8] hover:text-[#00a8e8] dark:hover:text-[#38bdf8]'}`}
+                  className={`p-[10px_16px] border rounded-[6px] font-bold text-[0.8rem] tracking-[0.5px] cursor-pointer transition-colors duration-200 whitespace-nowrap uppercase ${sortOrder === 'desc' ? 'bg-[#00a8e8] dark:bg-[#0284c7] text-white border-[#00a8e8] dark:border-[#0284c7]' : 'bg-white dark:bg-slate-800 text-[#2E3A59] dark:text-slate-300 border-[#E5E7EB] dark:border-slate-600 hover:border-[#00a8e8] dark:hover:border-[#38bdf8] hover:text-[#00a8e8] dark:hover:text-[#38bdf8]'}`}
                   onClick={() => setSortOrder(sortOrder === 'desc' ? 'default' : 'desc')}
                 >
                   Z-A ↑
@@ -389,7 +389,7 @@ const NursePage = () => {
                 {['All', 'Active', 'Inactive', 'On Leave'].map((status) => (
                   <button
                     key={status}
-                    className={`p-[10px_16px] border rounded-[6px] font-bold text-[0.8rem] tracking-[0.5px] cursor-pointer transition-colors duration-200 whitespace-nowrap uppercase ${filterStatus === status ? 'bg-[#0075a2] dark:bg-[#0369a1] text-white border-[#0075a2] dark:border-[#0369a1]' : 'bg-white dark:bg-slate-800 text-[#2E3A59] dark:text-slate-300 border-[#E5E7EB] dark:border-slate-600 hover:border-[#00a8e8] dark:hover:border-[#38bdf8] hover:text-[#00a8e8] dark:hover:text-[#38bdf8]'}`}
+                    className={`p-[10px_16px] border rounded-[6px] font-bold text-[0.8rem] tracking-[0.5px] cursor-pointer transition-colors duration-200 whitespace-nowrap uppercase ${filterStatus === status ? 'bg-[#00a8e8] dark:bg-[#0284c7] text-white border-[#00a8e8] dark:border-[#0284c7]' : 'bg-white dark:bg-slate-800 text-[#2E3A59] dark:text-slate-300 border-[#E5E7EB] dark:border-slate-600 hover:border-[#00a8e8] dark:hover:border-[#38bdf8] hover:text-[#00a8e8] dark:hover:text-[#38bdf8]'}`}
                     onClick={() => setFilterStatus(status)}
                   >
                     {status}

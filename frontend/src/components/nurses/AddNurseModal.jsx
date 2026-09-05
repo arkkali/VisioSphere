@@ -98,7 +98,7 @@ const AddNurseModal = ({ show, onClose, nurse, onChange, onSubmit, isSubmitting 
           <button
             onClick={onSubmit}
             disabled={isSubmitting}
-            className="p-[12px_32px] border-none bg-[#0075a2] dark:bg-[#0369a1] text-white rounded-[8px] font-bold hover:bg-[#00688f] dark:hover:bg-[#025c8f] hover:shadow-md hover:-translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-[12px_32px] border-none bg-[#00a8e8] dark:bg-[#0284c7] text-white rounded-[8px] font-bold hover:bg-[#0075a2] dark:hover:bg-[#0369a1] hover:shadow-md hover:-translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? 'Creating...' : 'Create Account'}
           </button>

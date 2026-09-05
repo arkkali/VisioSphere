@@ -193,7 +193,7 @@ const NurseTable = ({
               <button
                 key={i + 1}
                 onClick={() => onPageChange(i + 1)}
-                className={`w-[36px] h-[36px] rounded-[6px] font-bold text-[0.85rem] flex items-center justify-center transition-colors ${currentPage === i + 1 ? 'bg-[#0075a2] dark:bg-[#0369a1] text-white border-none' : 'bg-white dark:bg-slate-800 text-[#2E3A59] dark:text-slate-300 border border-[#A8A8A8] dark:border-slate-600 hover:bg-[#E5E7EB] dark:hover:bg-slate-700'}`}
+                className={`w-[36px] h-[36px] rounded-[6px] font-bold text-[0.85rem] flex items-center justify-center transition-colors ${currentPage === i + 1 ? 'bg-[#00a8e8] dark:bg-[#0284c7] text-white border-none' : 'bg-white dark:bg-slate-800 text-[#2E3A59] dark:text-slate-300 border border-[#A8A8A8] dark:border-slate-600 hover:bg-[#E5E7EB] dark:hover:bg-slate-700'}`}
               >
                 {i + 1}
               </button>

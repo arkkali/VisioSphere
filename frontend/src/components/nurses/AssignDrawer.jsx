@@ -134,7 +134,7 @@ const AssignDrawer = ({
                       <button
                         onClick={() => onAssign(elder)}
                         disabled={atCapacity}
-                        className="text-white bg-[#0075a2] dark:bg-[#0369a1] p-[6px_12px] rounded-[6px] text-[0.8rem] font-bold hover:bg-[#00688f] dark:hover:bg-[#025c8f] disabled:bg-[#A8A8A8] dark:disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
+                        className="text-white bg-[#00a8e8] dark:bg-[#0284c7] p-[6px_12px] rounded-[6px] text-[0.8rem] font-bold hover:bg-[#0075a2] dark:hover:bg-[#0369a1] disabled:bg-[#A8A8A8] dark:disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
                       >
                         Assign
                       </button>
