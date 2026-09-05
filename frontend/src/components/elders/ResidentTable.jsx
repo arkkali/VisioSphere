@@ -29,8 +29,11 @@ const ResidentTable = ({
           <thead className="bg-[#f8fafc] dark:bg-slate-900/50 border-b border-[#E5E7EB] dark:border-slate-700">
             <tr>
               <th className="w-[50px] text-center p-[16px_14px] font-black text-[#00212e] dark:text-slate-300 uppercase tracking-[0.8px] text-[0.75rem] whitespace-nowrap">
+                {/* Unnamed, this read as a bare "checkbox" — nothing said it
+                    selects the whole page. */}
                 <input
                   type="checkbox"
+                  aria-label="Select all residents on this page"
                   className="w-[16px] h-[16px] cursor-pointer accent-[#00a8e8]"
                   onChange={onSelectAll}
                   checked={currentResidents.length > 0 && currentResidents.every((r) => selectedCheckboxes.has(r._id))}
@@ -48,13 +51,13 @@ const ResidentTable = ({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={selectedHouse === 'Overall' ? 6 : 5} className="text-center p-[60px_40px] text-[#94a3b8] dark:text-slate-500 font-medium text-[0.95rem]">
+                <td colSpan={selectedHouse === 'Overall' ? 6 : 5} className="text-center p-[60px_40px] text-[#64748b] dark:text-slate-400 font-medium text-[0.95rem]">
                   Loading residents database...
                 </td>
               </tr>
             ) : currentResidents.length === 0 ? (
               <tr>
-                <td colSpan={selectedHouse === 'Overall' ? 6 : 5} className="text-center p-[60px_40px] text-[#94a3b8] dark:text-slate-500 font-medium text-[0.95rem]">
+                <td colSpan={selectedHouse === 'Overall' ? 6 : 5} className="text-center p-[60px_40px] text-[#64748b] dark:text-slate-400 font-medium text-[0.95rem]">
                   No residents found for this view.
                 </td>
               </tr>
@@ -65,15 +68,19 @@ const ResidentTable = ({
                   <React.Fragment key={resident._id}>
                     <tr className={`transition-colors duration-150 border-b border-[#f8fafc] dark:border-slate-700 hover:bg-[#e1f5fe]/30 dark:hover:bg-slate-700/50 ${expandedNotesId === resident._id ? 'bg-[#e1f5fe]/40 dark:bg-slate-800' : ''}`}>
                       <td className="w-[50px] text-center p-[16px_14px] text-[#475569] dark:text-slate-300 align-middle">
+                        {/* Named per row: every row checkbox was identical to a
+                            screen reader, with no way to tell which resident was
+                            about to be selected and then deleted. */}
                         <input
                           type="checkbox"
+                          aria-label={`Select ${getFullName(resident)}`}
                           className="w-[16px] h-[16px] cursor-pointer accent-[#00a8e8]"
                           checked={selectedCheckboxes.has(resident._id)}
                           onChange={() => onCheckboxChange(resident._id)}
                           onClick={(e) => e.stopPropagation()}
                         />
                       </td>
-                      <td className="p-[16px_14px] text-[#00a8e8] dark:text-[#38bdf8] align-middle font-mono font-bold">
+                      <td className="p-[16px_14px] text-[#0075a2] dark:text-[#38bdf8] align-middle font-mono font-bold">
                         {resident.residentId}
                       </td>
                       <td className="p-[16px_14px] text-[#00212e] dark:text-white align-middle font-bold text-[0.95rem]">
@@ -85,7 +92,11 @@ const ResidentTable = ({
                         </td>
                       )}
                       <td className="p-[16px_14px] align-middle text-center min-w-[130px]">
+                        {/* This control RECORDS a resident's attendance for the
+                            day. Unnamed it announced only as a combo box reading
+                            "Present", with no indication of whose day it was. */}
                         <select
+                          aria-label={`Attendance for ${getFullName(resident)}`}
                           value={resident.attendance || ''}
                           onChange={(e) => onAttendanceChange(resident._id, e.target.value)}
                           onClick={(e) => e.stopPropagation()}

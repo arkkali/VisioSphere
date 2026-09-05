@@ -5,6 +5,11 @@ const getFullName = (person) => {
   return [person.firstName, person.middleName, person.lastName].filter(Boolean).join(' ');
 };
 
+// The name to announce for a guardian. Falls back to the id so a record with
+// no name still gets a distinct accessible name rather than a blank one.
+const guardianDisplayName = (g) =>
+  [g.firstName, g.lastName].filter(Boolean).join(' ').trim() || g.guardianId || 'Unknown';
+
 const formatAssignedElders = (elders) => {
   if (!elders || elders.length === 0) return 'None';
   return elders.map((elder) => `${elder.firstName} ${elder.lastName}`).join(', ');
@@ -26,9 +31,9 @@ const GuardianTable = ({
   onPageChange,
 }) => {
   const getStatusClasses = (statusValue) => {
-    if (statusValue === 'ACTIVE') return 'border-[#10b981] text-[#10b981] bg-white hover:bg-[#f0fdf4] dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/40';
-    if (statusValue === 'INACTIVE') return 'border-[#e11d48] text-[#e11d48] bg-white hover:bg-[#fff1f2] dark:bg-rose-950/30 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-900/40';
-    if (statusValue === 'PENDING') return 'border-[#d97706] text-[#d97706] bg-white dark:bg-amber-950/30 dark:border-amber-700/50 dark:text-amber-500';
+    if (statusValue === 'ACTIVE') return 'border-[#047857] text-[#047857] bg-white hover:bg-[#f0fdf4] dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-900/40';
+    if (statusValue === 'INACTIVE') return 'border-[#be123c] text-[#be123c] bg-white hover:bg-[#fff1f2] dark:bg-rose-950/30 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-900/40';
+    if (statusValue === 'PENDING') return 'border-[#b45309] text-[#b45309] bg-white dark:bg-amber-950/30 dark:border-amber-700/50 dark:text-amber-500';
     return 'border-[#cbd5e1] text-[#64748b] bg-white dark:bg-slate-800 dark:border-slate-600 dark:text-slate-400';
   };
 
@@ -39,8 +44,11 @@ const GuardianTable = ({
           <thead>
             <tr className="bg-[#f8fafc] dark:bg-slate-900/50 border-b border-[#e2e8f0] dark:border-slate-700">
               <th className="p-[16px_20px] w-[50px] text-center">
+                {/* Unnamed, this read as a bare "checkbox" — nothing said it
+                    selects the whole page. */}
                 <input
                   type="checkbox"
+                  aria-label="Select all guardians on this page"
                   className="w-[16px] h-[16px] cursor-pointer accent-[#00a8e8]"
                   onChange={(e) => onSelectAll(e.target.checked)}
                   checked={currentGuardians.length > 0 && currentGuardians.every((g) => selectedCheckboxes.has(g.guardianId))}
@@ -58,11 +66,11 @@ const GuardianTable = ({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="8" className="text-center p-[60px] text-[#94a3b8] dark:text-slate-500 font-medium">Loading database records...</td>
+                <td colSpan="8" className="text-center p-[60px] text-[#64748b] dark:text-slate-400 font-medium">Loading database records...</td>
               </tr>
             ) : currentGuardians.length === 0 ? (
               <tr>
-                <td colSpan="8" className="text-center p-[60px] text-[#94a3b8] dark:text-slate-500 font-medium">No guardian records found.</td>
+                <td colSpan="8" className="text-center p-[60px] text-[#64748b] dark:text-slate-400 font-medium">No guardian records found.</td>
               </tr>
             ) : (
               currentGuardians.map((guardian) => {
@@ -74,6 +82,7 @@ const GuardianTable = ({
                 // enforces the same rule, so a crafted request cannot get round
                 // a disabled <select>.
                 const setupPending = !guardian.isPasswordSet;
+                const guardianName = guardianDisplayName(guardian);
                 const eldersAssigned = guardian.assignedElders?.length > 0
                   ? formatAssignedElders(guardian.assignedElders)
                   : 'None';
@@ -81,15 +90,19 @@ const GuardianTable = ({
                 return (
                   <tr key={guardian.guardianId} className="border-b border-[#f1f5f9] dark:border-slate-700 hover:bg-[#f8fafc] dark:hover:bg-slate-800/50 transition-colors">
                     <td className="p-[16px_20px] text-center align-middle">
+                      {/* Named per row: every row checkbox was identical to a
+                          screen reader, with no way to tell which guardian was
+                          about to be selected and then deleted. */}
                       <input
                         type="checkbox"
+                        aria-label={`Select ${guardianName}`}
                         className="w-[16px] h-[16px] cursor-pointer accent-[#00a8e8]"
                         checked={selectedCheckboxes.has(guardian.guardianId)}
                         onChange={() => onCheckboxChange(guardian.guardianId)}
                       />
                     </td>
                     <td className="p-[16px_20px] align-middle">
-                      <span className="bg-[#e0f2fe] dark:bg-[#0284c7]/20 text-[#0284c7] dark:text-[#38bdf8] font-bold font-mono text-[0.85rem] px-[10px] py-[4px] rounded-[6px] tracking-wide">
+                      <span className="bg-[#e0f2fe] dark:bg-[#0284c7]/20 text-[#00688f] dark:text-[#38bdf8] font-bold font-mono text-[0.85rem] px-[10px] py-[4px] rounded-[6px] tracking-wide">
                         {guardian.guardianId}
                       </span>
                     </td>
@@ -104,12 +117,12 @@ const GuardianTable = ({
                       <div className="text-[0.8rem] font-medium text-[#64748b] dark:text-slate-400">{guardian.phone || 'No phone provided'}</div>
                     </td>
                     <td className="p-[16px_20px] align-middle text-center">
-                      <span className={`font-semibold text-[0.85rem] ${eldersAssigned === 'None' ? 'text-[#94a3b8] dark:text-slate-500' : 'text-[#475569] dark:text-slate-300'}`}>
+                      <span className={`font-semibold text-[0.85rem] ${eldersAssigned === 'None' ? 'text-[#64748b] dark:text-slate-400' : 'text-[#475569] dark:text-slate-300'}`}>
                         {eldersAssigned}
                       </span>
                     </td>
                     <td className="p-[16px_20px] align-middle text-center">
-                      <span className={`inline-block px-[12px] py-[4px] rounded-[6px] text-[0.7rem] font-bold tracking-[0.5px] uppercase ${guardian.isPasswordSet ? 'bg-[#f0fdf4] dark:bg-emerald-950/30 text-[#10b981] dark:text-emerald-400' : 'bg-[#fff1f2] dark:bg-rose-950/30 text-[#f43f5e] dark:text-rose-400'}`}>
+                      <span className={`inline-block px-[12px] py-[4px] rounded-[6px] text-[0.7rem] font-bold tracking-[0.5px] uppercase ${guardian.isPasswordSet ? 'bg-[#f0fdf4] dark:bg-emerald-950/30 text-[#047857] dark:text-emerald-400' : 'bg-[#fff1f2] dark:bg-rose-950/30 text-[#be123c] dark:text-rose-400'}`}>
                         {guardian.isPasswordSet ? 'COMPLETED' : 'PENDING'}
                       </span>
                     </td>
@@ -122,7 +135,11 @@ const GuardianTable = ({
                           PENDING
                         </span>
                       ) : (
+                        /* This control CHANGES a guardian's account status on
+                           selection. Unnamed it announced only as a combo box
+                           reading "ACTIVE". */
                         <select
+                          aria-label={`Account status for ${guardianName}`}
                           value={statusValue}
                           onChange={(e) => onStatusChange(guardian.guardianId, e.target.value)}
                           onClick={(e) => e.stopPropagation()}

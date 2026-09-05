@@ -10,6 +10,7 @@ const GuardianFilters = ({ searchTerm, onSearchChange, sortOrder, onSortChange, 
         </svg>
         <input
           type="text"
+          aria-label="Search guardians by ID, name, or email"
           placeholder="Search by Guardian ID, Name, or Email..."
           value={searchTerm}
           onChange={(e) => onSearchChange(e.target.value)}

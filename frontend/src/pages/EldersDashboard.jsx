@@ -656,7 +656,7 @@ const EldersDashboard = () => {
                       key={stat.label}
                       className={`flex flex-col items-center gap-[6px] text-center p-[10px] lg:p-[12px_16px] ${i < arr.length - 1 ? 'border-r border-b md:border-b-0 border-[#E5E7EB] dark:border-slate-700' : ''}`}
                     >
-                      <span className="text-[0.65rem] text-[#64748b] dark:text-slate-500 font-bold uppercase tracking-[0.5px]">{stat.label}</span>
+                      <span className="text-[0.65rem] text-[#64748b] dark:text-slate-400 font-bold uppercase tracking-[0.5px]">{stat.label}</span>
                       <span className={`text-[2rem] font-black leading-none ${stat.color}`}>{stat.value}</span>
                     </div>
                   ))}
@@ -686,6 +686,7 @@ const EldersDashboard = () => {
                 </svg>
                 <input
                   type="text"
+                  aria-label="Search residents by ID or name"
                   placeholder="Search by Resident ID or Name..."
                   value={searchTerm}
                   onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
@@ -693,7 +694,10 @@ const EldersDashboard = () => {
                 />
               </div>
               <div className="flex gap-[10px] flex-wrap w-full lg:w-auto justify-between lg:justify-start">
+                {/* The filter selects have no <label> at all — their only hint
+                    is the first <option>, which is not an accessible name. */}
                 <select
+                  aria-label="Filter residents by attendance"
                   value={filterAttendance}
                   onChange={(e) => { setFilterAttendance(e.target.value); setCurrentPage(1); }}
                   className="p-[12px_34px_12px_14px] bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-600 rounded-[8px] text-[#00212e] dark:text-white font-bold text-[0.85rem] cursor-pointer shadow-sm outline-none focus:border-[#00a8e8] dark:focus:border-[#38bdf8] appearance-none bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%2300212e%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%23ffffff%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] bg-no-repeat bg-[right_14px_center]"
@@ -703,6 +707,7 @@ const EldersDashboard = () => {
                   <option value="Not Present">Not Present</option>
                 </select>
                 <select
+                  aria-label="Filter residents by notes"
                   value={filterNotes}
                   onChange={(e) => { setFilterNotes(e.target.value); setCurrentPage(1); }}
                   className="p-[12px_34px_12px_14px] bg-white dark:bg-slate-800 border border-[#E5E7EB] dark:border-slate-600 rounded-[8px] text-[#00212e] dark:text-white font-bold text-[0.85rem] cursor-pointer shadow-sm outline-none focus:border-[#00a8e8] dark:focus:border-[#38bdf8] appearance-none bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%2300212e%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%23ffffff%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] bg-no-repeat bg-[right_14px_center]"
