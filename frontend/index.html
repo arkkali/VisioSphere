@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/src/assets/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Warm the two cross-origin connections the CCTV hub needs, in parallel
+         with the bundle instead of serially after it.
+
+         The camera tile is the Largest Contentful Paint element, and nothing
+         about it can start until: React mounts, GET /stream/token completes
+         against the API origin, and only THEN the <img> mounts and opens a
+         second connection to the stream origin. Two full DNS + TCP + TLS
+         handshakes sat on the critical path, one after the other — the
+         "6 critical request chains" in the report.
+
+         These are hints only: nothing is fetched, no behaviour changes, and a
+         browser that ignores them is exactly as it is today. `crossorigin` on
+         the API because axios requests it in CORS mode; the stream <img> has
+         no crossorigin attribute, so its connection must be the plain one. -->
+    <link rel="preconnect" href="https://visiosphere-backend.onrender.com" crossorigin />
+    <link rel="preconnect" href="https://cctv.visiosphere.live" />
     <title>VisioSphere</title>
   </head>
   <body>
