@@ -38,6 +38,17 @@ const corsOptions = {
   // exposed here. Without this the web app would silently never pick up a
   // renewed session token while mobile, which is not subject to CORS, would.
   exposedHeaders: [RENEWED_TOKEN_HEADER],
+  // Every authenticated call carries an Authorization header, which makes it a
+  // non-simple request: the browser sends an OPTIONS preflight FIRST and waits
+  // for it before the real request leaves. Without maxAge that preflight is
+  // repeated constantly (Chrome caches an unspecified one for 5 seconds), so
+  // each API call costs two round trips to Render instead of one.
+  //
+  // It is worst on GET /api/stream/token, which sits directly in front of the
+  // camera feed: the monitoring page cannot set <img src> until that call
+  // returns, so the extra round trip is charged straight to Largest Contentful
+  // Paint. 24h is the ceiling Chrome will honour.
+  maxAge: 86400,
 };
 
 app.use(cors(corsOptions));
