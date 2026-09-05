@@ -22,6 +22,45 @@ import axiosInstance from '../api/axiosInstance';
  * no token means no feed URL, so the tiles show "No Signal" rather than
  * attempting an unauthenticated request.
  */
+/**
+ * The in-flight (or completed) result of a token request started at boot.
+ * One-shot: the first hook instance consumes it, everything after mints
+ * normally.
+ */
+let primed = null;
+
+/**
+ * Start minting the stream token BEFORE React has mounted anything.
+ *
+ * WHY
+ *
+ * Lighthouse measured Largest Contentful Paint on the monitoring hub at
+ * 3,730 ms and attributed 75% of it — 2,790 ms — to "Load Delay": the gap
+ * before the browser even begins requesting the camera image. Once requested,
+ * the first frame lands in 640 ms. The camera is not slow; the queue in front
+ * of it is.
+ *
+ * That queue was: entry chunk, then the route's chunk, then React mounts, then
+ * this request, and only then does <img src> exist. The request needs nothing
+ * from React — just the auth token already sitting in localStorage — so it can
+ * run alongside the chunk download instead of behind it.
+ *
+ * Deliberately scoped to the monitoring routes. Every other page would gain an
+ * API call it has no use for.
+ */
+export const primeStreamToken = () => {
+  if (primed) return primed;
+  if (typeof window === 'undefined') return null;
+  if (!/\/(admin|nurse)\/monitoring\/?$/.test(window.location.pathname)) return null;
+  if (!localStorage.getItem('token')) return null;
+
+  primed = axiosInstance
+    .get('/stream/token')
+    .then(({ data }) => data)
+    .catch(() => null); // a real failure is retried by the hook below
+  return primed;
+};
+
 export const useStreamToken = () => {
   const [stream, setStream] = useState(null); // { token, streamBase }
   const timerRef = useRef(null);
@@ -30,9 +69,17 @@ export const useStreamToken = () => {
   useEffect(() => {
     cancelledRef.current = false;
 
-    const fetchToken = async () => {
+    const fetchToken = async (allowPrimed = false) => {
       try {
-        const { data } = await axiosInstance.get('/stream/token');
+        // Reuse the request started at boot if there is one; it is a one-shot,
+        // so refreshes below always mint fresh.
+        let data = null;
+        if (allowPrimed && primed) {
+          data = await primed;
+          primed = null;
+        }
+        if (!data) ({ data } = await axiosInstance.get('/stream/token'));
+
         if (cancelledRef.current || !data?.token) return;
 
         setStream({
@@ -56,7 +103,7 @@ export const useStreamToken = () => {
       }
     };
 
-    fetchToken();
+    fetchToken(true);
 
     return () => {
       cancelledRef.current = true;
