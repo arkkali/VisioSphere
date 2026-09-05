@@ -191,6 +191,21 @@ const anotherTabIsAlive = () =>
  * token that is about to be thrown away. The wait only happens on the
  * ambiguous path; a normal reload resolves without any delay at all.
  */
+/**
+ * Is this page load provably a CONTINUATION of a running browser session?
+ *
+ * True only when the shared heartbeat is fresher than ALIVE_GRACE_MS — which is
+ * exactly the condition under which startBrowserSessionGuard() below cannot
+ * clear the session (it short-circuits before the ping). So a caller that gates
+ * on this may act BEFORE the guard has finished without any risk of acting for
+ * a session that is about to end.
+ *
+ * It exists so main.jsx can start the stream-token request without first
+ * waiting out the guard's ping window. False is the safe answer and is what a
+ * genuinely first load returns; the caller simply waits for the guard instead.
+ */
+export const sessionLooksContinuous = () => heartbeatAge() <= ALIVE_GRACE_MS;
+
 export const startBrowserSessionGuard = async () => {
   answerPings();
 

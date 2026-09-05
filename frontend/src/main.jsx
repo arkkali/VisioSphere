@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
-import { startBrowserSessionGuard } from './utils/browserSession'
+import { startBrowserSessionGuard, sessionLooksContinuous } from './utils/browserSession'
 import { primeStreamToken } from './hooks/useStreamToken'
 
 const render = () => createRoot(document.getElementById('root')).render(<App />)
@@ -15,12 +15,20 @@ const render = () => createRoot(document.getElementById('root')).render(<App />)
  * The catch is not decoration: a storage failure inside the guard must never be
  * the reason the app shows a blank page.
  */
+// When the heartbeat proves this load continues a running browser, the guard
+// cannot clear the session — so there is nothing to wait for, and the stream
+// token request should not sit behind the guard's ping window (up to 300 ms of
+// dead time on the one page whose Largest Contentful Paint is a camera feed).
+// Both calls are no-ops unless this load is a monitoring route with a live
+// session, and primeStreamToken() itself is a no-op when a still-valid token is
+// already cached — the common case, which needs no request at all.
+if (sessionLooksContinuous()) primeStreamToken();
+
 startBrowserSessionGuard()
   .catch(() => {})
   .finally(() => {
-    // After the guard, never before: priming with a token the guard is about to
-    // discard would fire a request on behalf of a session that is ending.
-    // A no-op unless this load is a monitoring route with a live session.
+    // The ambiguous case only: priming a session the guard was still deciding
+    // about would fire a request on behalf of one that is ending.
     primeStreamToken();
     render();
   })

@@ -6,7 +6,13 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { io } from "socket.io-client";
+// NOT a static import. socket.io-client is 42 KB (13 KB gzipped) and this
+// provider sits above the router, so a static import welds it into the entry
+// chunk — the one bundle every route must download, parse and EXECUTE before
+// any page code runs. On /admin/monitoring that meant 13 KB of transport code
+// was parsed before the request for the stream token could even be issued, and
+// the camera image sits behind that request. Nothing here is needed until
+// connect() is called from an effect, well after first paint.
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 const MAX_ALERTS = 100;
@@ -71,6 +77,11 @@ export const AlertProvider = ({ children }) => {
    */
   const connect = useCallback(() => {
     if (socketRef.current) return;
+    // Claimed synchronously: connect() can be called twice before the dynamic
+    // import settles (mount + AUTH_EVENT), and the ref guard above only helps
+    // once socketRef is actually set. Without this, two sockets open.
+    socketRef.current = 'pending';
+    import("socket.io-client").then(({ io }) => {
     const socket = io(SOCKET_URL, {
       transports: ["polling", "websocket"],
       reconnection: true,
@@ -165,6 +176,13 @@ export const AlertProvider = ({ children }) => {
         }, 10_000);
       });
     }
+    }).catch((err) => {
+      // The chunk failed to load (offline, a stale deploy). Release the claim
+      // so a later connect() — a reconnect, or the AUTH_EVENT after sign-in —
+      // can try again instead of believing a socket already exists.
+      socketRef.current = null;
+      console.warn("[Socket.io] could not load the client:", err?.message);
+    });
 
     return () => {};
   }, []);

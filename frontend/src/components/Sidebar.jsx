@@ -1,6 +1,10 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import visioLogo from '../assets/visio.png';
+// WebP at the size it is actually painted. The PNG original is untouched in
+// src/assets: it is 1715x482 and 153 KiB, drawn here 180 CSS px wide, and
+// Lighthouse charged the full 153 KiB to "Properly size images" on every
+// authenticated page — this sidebar is on all of them. Now 15 KiB.
+import visioLogo from '../assets/visio-360.webp';
 import { clearSession } from '../utils/browserSession';
 
 const readToggle = () => localStorage.getItem('enableSidebarToggle') === 'true';
@@ -67,7 +71,7 @@ const Sidebar = () => {
       {mobileOpen && <button type="button" aria-label="Close navigation menu" onClick={closeMobileSidebar} className="md:hidden fixed inset-0 z-[950] bg-slate-950/60" />}
       <div className={`w-[250px] h-screen bg-[#e1f4fd] dark:bg-slate-900 border-r border-transparent dark:border-slate-800 fixed left-0 top-0 flex flex-col z-[1000] box-border shadow-[2px_0_10px_rgba(0,0,0,0.03)] transition-all duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="pt-[30px] px-[24px] pb-[10px] flex items-center justify-center w-full box-border">
-          <img src={visioLogo} alt="VisioSphere Logo" className="max-w-[180px] h-auto object-contain dark:brightness-200 dark:contrast-200 transition-all duration-300" />
+          <img src={visioLogo} alt="VisioSphere Logo" width={360} height={101} className="max-w-[180px] h-auto object-contain dark:brightness-200 dark:contrast-200 transition-all duration-300" />
         </div>
 
         {showToggle && (

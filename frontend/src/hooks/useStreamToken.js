@@ -30,6 +30,69 @@ import axiosInstance from '../api/axiosInstance';
 let primed = null;
 
 /**
+ * WHERE A STILL-VALID TOKEN IS KEPT BETWEEN PAGE LOADS.
+ *
+ * WHY THIS IS SAFE TO CACHE
+ *
+ * signStreamToken() takes no arguments and binds nothing: the token is
+ * `v1.<exp>.<hmac("v1.<exp>", STREAM_SIGNING_SECRET)>`. It carries no user, no
+ * session and no facility — two people signing in a second apart get the same
+ * string. It is a 10-minute bearer capability for "open a feed", and it is
+ * ALREADY in the page in plain sight: it sits in the `src` of every camera
+ * <img>, in the DOM, and in the network log. Parking it in localStorage until
+ * its own `exp` therefore exposes nothing that was not already exposed.
+ *
+ * clearSession() does localStorage.clear() and restores only PRESERVED_KEYS, so
+ * signing out drops this with everything else. That is deliberate and must stay
+ * that way: do NOT add this key to PRESERVED_KEYS.
+ *
+ * WHY IT EXISTS
+ *
+ * Lighthouse put Largest Contentful Paint on this page at 3,960 ms and charged
+ * 3,050 ms of it to "Load Delay" — the browser had not yet ASKED for the camera
+ * image. Once asked, the first frame arrived in 620 ms. The queue in front of
+ * the request was the request itself: nothing could set <img src> until a
+ * cross-continent round trip to the backend on Render had returned a token.
+ *
+ * A token already in hand and not yet expired removes that round trip
+ * completely — the first render of the page has a playable URL.
+ */
+const CACHE_KEY = 'vs_streamToken';
+
+/** Discard a cached token this many seconds before it actually expires. */
+const CACHE_SAFETY_S = 30;
+
+const readCachedToken = () => {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    if (!cached?.token || typeof cached.exp !== 'number') return null;
+    // Expired, or close enough to expiry that ai_core could reject it between
+    // here and the connection. Treat as absent and mint a fresh one.
+    if (cached.exp - CACHE_SAFETY_S <= Math.floor(Date.now() / 1000)) return null;
+    return { token: cached.token, streamBase: cached.streamBase || '', exp: cached.exp };
+  } catch {
+    // Unreadable or malformed storage: behave exactly as if nothing was cached.
+    return null;
+  }
+};
+
+const writeCachedToken = (data, streamBase) => {
+  try {
+    // `exp` is absolute unix-seconds from the backend. Fall back to expiresIn
+    // when an older backend does not send it.
+    const exp = typeof data.exp === 'number'
+      ? data.exp
+      : Math.floor(Date.now() / 1000) + (data.expiresIn ?? 300);
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ token: data.token, exp, streamBase }));
+  } catch {
+    // Storage full or unavailable — the feed still works, it just pays the
+    // round trip again on the next load.
+  }
+};
+
+/**
  * Start minting the stream token BEFORE React has mounted anything.
  *
  * WHY
@@ -53,6 +116,9 @@ export const primeStreamToken = () => {
   if (typeof window === 'undefined') return null;
   if (!/\/(admin|nurse)\/monitoring\/?$/.test(window.location.pathname)) return null;
   if (!localStorage.getItem('token')) return null;
+  // A cached token that is still good needs no request at all; useStreamToken
+  // picks it up synchronously as its initial state.
+  if (readCachedToken()) return null;
 
   primed = axiosInstance
     .get('/stream/token')
@@ -62,7 +128,9 @@ export const primeStreamToken = () => {
 };
 
 export const useStreamToken = () => {
-  const [stream, setStream] = useState(null); // { token, streamBase }
+  // Seeded from the cache, NOT null: a valid cached token means the camera
+  // <img> has a src on the very first render, with no network in between.
+  const [stream, setStream] = useState(readCachedToken); // { token, streamBase }
   const timerRef = useRef(null);
   const cancelledRef = useRef(false);
 
@@ -82,13 +150,13 @@ export const useStreamToken = () => {
 
         if (cancelledRef.current || !data?.token) return;
 
-        setStream({
-          token: data.token,
-          // The backend names the public tunnel URL; fall back to the build-time
-          // value so a backend without STREAM_PUBLIC_URL set still works.
-          streamBase: (data.streamBase || import.meta.env.VITE_STREAM_URL || '')
-            .replace(/\/$/, ''),
-        });
+        // The backend names the public tunnel URL; fall back to the build-time
+        // value so a backend without STREAM_PUBLIC_URL set still works.
+        const streamBase = (data.streamBase || import.meta.env.VITE_STREAM_URL || '')
+          .replace(/\/$/, '');
+
+        setStream({ token: data.token, streamBase });
+        writeCachedToken(data, streamBase);
 
         // Re-mint ~30s before expiry so an open feed never drops on a stale
         // token. Clamped so a nonsense expiresIn cannot spin this into a
@@ -103,7 +171,24 @@ export const useStreamToken = () => {
       }
     };
 
-    fetchToken(true);
+    // A cached token that is still valid is already in state and already
+    // driving the <img> src. Re-minting now would hand every camera a NEW url,
+    // and CameraFeed keys its <img> on the url — so the browser would tear down
+    // and reopen every MJPEG connection a moment after the page settled, for a
+    // token that had minutes left. Schedule the refresh against the cached
+    // expiry instead and leave the open streams alone.
+    const cached = readCachedToken();
+    if (cached) {
+      const lead = Math.min(
+        Math.max(cached.exp - CACHE_SAFETY_S - Math.floor(Date.now() / 1000), 15),
+        86400,
+      );
+      timerRef.current = setTimeout(fetchToken, lead * 1000);
+      // The boot-time prime is skipped when a cached token exists, so there is
+      // no in-flight request to drain here.
+    } else {
+      fetchToken(true);
+    }
 
     return () => {
       cancelledRef.current = true;
