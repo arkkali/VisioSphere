@@ -55,8 +55,8 @@ const DataPrivacyTab = ({ onMessage }) => {
             <h3 className="m-0 text-[1.1rem] text-[#00212e] dark:text-white font-extrabold">CCTV Video Retention Policy</h3>
             <p className="text-[#64748b] dark:text-slate-400 m-0 text-[0.95rem]">Automatic permanent deletion cycle for recorded facility footage.</p>
             <div className="mt-[8px] flex items-center gap-[12px]">
-              <input type="text" value="30 Days" disabled className="p-[12px_16px] bg-[#e2e8f0] dark:bg-slate-800 border-[2px] border-[#cbd5e1] dark:border-slate-600 text-[#475569] dark:text-slate-300 font-black text-[1rem] rounded-[8px] w-[120px] text-center cursor-not-allowed opacity-80" />
-              <span className="text-[0.85rem] font-bold text-[#94a3b8] dark:text-slate-400 uppercase tracking-[1px] bg-[#f1f5f9] dark:bg-slate-700 p-[6px_12px] rounded-[6px]">System Locked</span>
+              <input type="text" value="30 Days" disabled aria-label="CCTV video retention period" className="p-[12px_16px] bg-[#e2e8f0] dark:bg-slate-800 border-[2px] border-[#cbd5e1] dark:border-slate-600 text-[#475569] dark:text-slate-300 font-black text-[1rem] rounded-[8px] w-[120px] text-center cursor-not-allowed opacity-80" />
+              <span className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-400 uppercase tracking-[1px] bg-[#f1f5f9] dark:bg-slate-700 p-[6px_12px] rounded-[6px]">System Locked</span>
             </div>
           </div>
 
@@ -68,8 +68,8 @@ const DataPrivacyTab = ({ onMessage }) => {
                 <h3 className="m-0 text-[1.1rem] text-[#00212e] dark:text-white font-extrabold">Audit Trail Auto-Archive</h3>
                 <p className="text-[#64748b] dark:text-slate-400 m-0 text-[0.95rem]">Every 30 days, logs are exported to a structured Excel file and purged from the database.</p>
                 <div className="mt-[4px] flex items-center gap-[12px]">
-                  <input type="text" value="30 Days" disabled className="p-[12px_16px] bg-[#e2e8f0] dark:bg-slate-800 border-[2px] border-[#cbd5e1] dark:border-slate-600 text-[#475569] dark:text-slate-300 font-black text-[1rem] rounded-[8px] w-[120px] text-center cursor-not-allowed opacity-80" />
-                  <span className="text-[0.85rem] font-bold text-[#94a3b8] dark:text-slate-400 uppercase tracking-[1px] bg-[#f1f5f9] dark:bg-slate-700 p-[6px_12px] rounded-[6px]">System Locked</span>
+                  <input type="text" value="30 Days" disabled aria-label="Audit trail auto-archive period" className="p-[12px_16px] bg-[#e2e8f0] dark:bg-slate-800 border-[2px] border-[#cbd5e1] dark:border-slate-600 text-[#475569] dark:text-slate-300 font-black text-[1rem] rounded-[8px] w-[120px] text-center cursor-not-allowed opacity-80" />
+                  <span className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-400 uppercase tracking-[1px] bg-[#f1f5f9] dark:bg-slate-700 p-[6px_12px] rounded-[6px]">System Locked</span>
                 </div>
               </div>
 

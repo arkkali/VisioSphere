@@ -51,9 +51,10 @@ const TwoFAModal = ({ onConfirm, onCancel }) => {
 
         <div className="flex flex-col gap-[16px]">
           <div className="flex flex-col gap-[8px]">
-            <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Enter 6-Digit PIN</label>
+            <label htmlFor="twofa-pin" className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Enter 6-Digit PIN</label>
             <div className="relative">
               <input
+                id="twofa-pin"
                 type={showPin ? 'text' : 'password'}
                 maxLength="6"
                 value={pinInput}
@@ -61,15 +62,16 @@ const TwoFAModal = ({ onConfirm, onCancel }) => {
                 placeholder="• • • • • •"
                 className="w-full p-[16px_40px_16px_16px] text-[1.5rem] tracking-[12px] text-center font-black text-[#00212e] dark:text-white bg-[#f8fafc] dark:bg-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-700 rounded-[8px] transition-colors outline-none focus:border-[#00a8e8] box-border"
               />
-              <button type="button" className="absolute right-[16px] top-[20px] bg-transparent border-none text-[#94a3b8] dark:text-slate-500 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0" onClick={() => setShowPin(!showPin)} tabIndex="-1">
+              <button type="button" aria-label={showPin ? 'Hide PIN' : 'Show PIN'} aria-pressed={showPin} className="absolute right-[16px] top-[20px] w-[24px] h-[24px] flex items-center justify-center bg-transparent border-none text-[#94a3b8] dark:text-slate-500 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0" onClick={() => setShowPin(!showPin)} tabIndex="-1">
                 {showPin ? <EyeOffIcon /> : <EyeIcon />}
               </button>
             </div>
           </div>
           <div className="flex flex-col gap-[8px]">
-            <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Confirm PIN</label>
+            <label htmlFor="twofa-pin-confirm" className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Confirm PIN</label>
             <div className="relative">
               <input
+                id="twofa-pin-confirm"
                 type={showPin ? 'text' : 'password'}
                 maxLength="6"
                 value={pinConfirm}
@@ -77,7 +79,7 @@ const TwoFAModal = ({ onConfirm, onCancel }) => {
                 placeholder="• • • • • •"
                 className="w-full p-[16px_40px_16px_16px] text-[1.5rem] tracking-[12px] text-center font-black text-[#00212e] dark:text-white bg-[#f8fafc] dark:bg-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-700 rounded-[8px] transition-colors outline-none focus:border-[#00a8e8] box-border"
               />
-              <button type="button" className="absolute right-[16px] top-[20px] bg-transparent border-none text-[#94a3b8] dark:text-slate-500 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0" onClick={() => setShowPin(!showPin)} tabIndex="-1">
+              <button type="button" aria-label={showPin ? 'Hide PIN' : 'Show PIN'} aria-pressed={showPin} className="absolute right-[16px] top-[20px] w-[24px] h-[24px] flex items-center justify-center bg-transparent border-none text-[#94a3b8] dark:text-slate-500 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0" onClick={() => setShowPin(!showPin)} tabIndex="-1">
                 {showPin ? <EyeOffIcon /> : <EyeIcon />}
               </button>
             </div>

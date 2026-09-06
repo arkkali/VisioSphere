@@ -28,8 +28,12 @@ const NurseLinkCard = ({ linkedNurseId, enableSidebarToggle, onLink, onUnlink, o
         {!linkedNurseId ? (
           <div className="flex flex-col md:flex-row gap-[12px] items-end">
             <div className="flex flex-col gap-[8px] flex-1 w-full">
-              <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Nurse ID</label>
+              {/* The visible label was never tied to the field. This card has
+                  TWO branches and each one had its own unlabelled control — which
+                  is why only one showed up per audit run. */}
+              <label htmlFor="settings-link-nurse-id" className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Nurse ID</label>
               <input
+                id="settings-link-nurse-id"
                 type="text"
                 placeholder="e.g., N-202601"
                 value={nurseIdInput}
@@ -57,7 +61,7 @@ const NurseLinkCard = ({ linkedNurseId, enableSidebarToggle, onLink, onUnlink, o
                 <span className="text-[#64748b] dark:text-slate-400 text-[0.85rem]">Show the toggle in the sidebar to switch views instantly.</span>
               </div>
               <label className="relative inline-block w-[52px] h-[28px]">
-                <input type="checkbox" className="opacity-0 w-0 h-0 peer" checked={enableSidebarToggle} onChange={(e) => handleToggleSidebar(e.target.checked)} />
+                <input type="checkbox" aria-label="Enable Sidebar Role Switcher" className="opacity-0 w-0 h-0 peer" checked={enableSidebarToggle} onChange={(e) => handleToggleSidebar(e.target.checked)} />
                 <span className="absolute cursor-pointer top-0 left-0 right-0 bottom-0 bg-[#cbd5e1] dark:bg-slate-600 transition-colors duration-300 rounded-[28px] before:absolute before:content-[''] before:h-[22px] before:w-[22px] before:left-[3px] before:bottom-[3px] before:bg-white before:transition-transform before:duration-300 before:rounded-full peer-checked:bg-[#00a8e8] peer-checked:before:translate-x-[24px]"></span>
               </label>
             </div>
