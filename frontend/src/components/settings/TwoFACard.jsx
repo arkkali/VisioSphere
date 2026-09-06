@@ -19,8 +19,8 @@ const TwoFACard = ({ is2FAEnabled, isNurseView, isLinkedNurse, onToggle, activeM
     <>
       <div className="flex flex-col gap-[16px]">
         <div className="flex justify-between items-center border-b border-[#f1f5f9] dark:border-slate-700 pb-[8px]">
-          <h4 className="m-0 text-[1rem] text-[#00212e] dark:text-white font-bold">Two-Factor Authentication (2FA)</h4>
-          <span className={`text-[0.8rem] font-black uppercase tracking-[1px] px-[8px] py-[4px] rounded-[4px] ${is2FAEnabled ? 'bg-[#f0fdf4] dark:bg-emerald-900/30 text-[#10b981] dark:text-emerald-400' : 'bg-[#f1f5f9] dark:bg-slate-700 text-[#64748b] dark:text-slate-300'}`}>
+          <h3 className="m-0 text-[1rem] text-[#00212e] dark:text-white font-bold">Two-Factor Authentication (2FA)</h3>
+          <span className={`text-[0.8rem] font-black uppercase tracking-[1px] px-[8px] py-[4px] rounded-[4px] ${is2FAEnabled ? 'bg-[#f0fdf4] dark:bg-emerald-900/30 text-[#047857] dark:text-emerald-400' : 'bg-[#f1f5f9] dark:bg-slate-700 text-[#475569] dark:text-slate-300'}`}>
             {is2FAEnabled ? 'Enabled' : 'Disabled'}
           </span>
         </div>
@@ -33,6 +33,7 @@ const TwoFACard = ({ is2FAEnabled, isNurseView, isLinkedNurse, onToggle, activeM
           <label className={`relative inline-block w-[52px] h-[28px] ${isInherited ? 'opacity-50 cursor-not-allowed' : ''}`}>
             <input
               type="checkbox"
+              aria-label="Two-Factor Authentication (2FA)"
               className="opacity-0 w-0 h-0 peer"
               checked={is2FAEnabled}
               onChange={(e) => handleToggle(e.target.checked)}

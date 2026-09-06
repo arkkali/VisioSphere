@@ -449,7 +449,7 @@ const Settings = () => {
 
                   <div className="bg-white dark:bg-slate-800 border border-[#e2e8f0] dark:border-slate-700 rounded-[16px] overflow-hidden shadow-sm transition-colors duration-300">
                     <div className="p-[20px_24px] border-b border-[#e2e8f0] dark:border-slate-700 bg-[#f8fafc] dark:bg-slate-900/50">
-                      <h3 className="m-0 text-[1.2rem] text-[#00212e] dark:text-white font-extrabold">Security & Authentication</h3>
+                      <h2 className="m-0 text-[1.2rem] text-[#00212e] dark:text-white font-extrabold">Security & Authentication</h2>
                     </div>
                     <div className="p-[24px] flex flex-col gap-[32px]">
                       <PasswordCard onSubmit={handleChangePassword} />

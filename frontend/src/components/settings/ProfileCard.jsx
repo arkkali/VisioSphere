@@ -13,13 +13,17 @@ const ProfileCard = ({ displayName, theme, onDisplayNameChange, onThemeChange, o
   return (
     <div className="bg-white dark:bg-slate-800 border border-[#e2e8f0] dark:border-slate-700 rounded-[16px] overflow-hidden shadow-sm transition-colors duration-300">
       <div className="p-[20px_24px] border-b border-[#e2e8f0] dark:border-slate-700 bg-[#f8fafc] dark:bg-slate-900/50">
-        <h3 className="m-0 text-[1.2rem] text-[#00212e] dark:text-white font-extrabold">Profile Details</h3>
+        <h2 className="m-0 text-[1.2rem] text-[#00212e] dark:text-white font-extrabold">Profile Details</h2>
       </div>
       <div className="p-[24px] flex flex-col gap-[20px]">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
           <div className="flex flex-col gap-[8px]">
-            <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Display Name</label>
+            {/* The visible label was never associated with the field, so the
+                control announced with no name at all. htmlFor also makes the
+                visible text clickable. */}
+            <label htmlFor="settings-display-name" className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Display Name</label>
             <input
+              id="settings-display-name"
               type="text"
               value={localName}
               onChange={(e) => setLocalName(e.target.value)}
@@ -27,8 +31,9 @@ const ProfileCard = ({ displayName, theme, onDisplayNameChange, onThemeChange, o
             />
           </div>
           <div className="flex flex-col gap-[8px]">
-            <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Interface Theme</label>
+            <label htmlFor="settings-interface-theme" className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Interface Theme</label>
             <select
+              id="settings-interface-theme"
               value={localTheme}
               onChange={(e) => setLocalTheme(e.target.value)}
               className="p-[12px_16px] bg-white dark:bg-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-600 rounded-[8px] text-[1rem] font-medium text-[#00212e] dark:text-white outline-none focus:border-[#00a8e8] dark:focus:border-[#00a8e8] transition-colors cursor-pointer appearance-none bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%2300212e%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_width=%2212%22_height=%228%22_viewBox=%220_0_12_8%22%3E%3Cpath_fill=%22%23ffffff%22_d=%22M1_1l5_5_5-5%22/%3E%3C/svg%3E')] bg-no-repeat bg-[right_16px_center]"

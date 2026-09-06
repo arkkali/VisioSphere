@@ -11,12 +11,12 @@ const AuditStatsHeader = ({ logs }) => {
       </div>
       <div className="flex flex-row justify-around lg:justify-end gap-[30px] w-full lg:w-auto">
         <div className="flex flex-col items-center">
-          <span className="text-[0.75rem] text-[#94a3b8] dark:text-slate-500 uppercase tracking-[1px] mb-[4px] font-extrabold">Total Logs</span>
-          <span className="text-[2rem] font-black text-[#00a8e8] dark:text-[#38bdf8] leading-none">{logs.length}</span>
+          <span className="text-[0.75rem] text-[#64748b] dark:text-slate-400 uppercase tracking-[1px] mb-[4px] font-extrabold">Total Logs</span>
+          <span className="text-[2rem] font-black text-[#0075a2] dark:text-[#38bdf8] leading-none">{logs.length}</span>
         </div>
         <div className="flex flex-col items-center">
-          <span className="text-[0.75rem] text-[#94a3b8] dark:text-slate-500 uppercase tracking-[1px] mb-[4px] font-extrabold">Today's Actions</span>
-          <span className="text-[2rem] font-black text-[#10b981] dark:text-emerald-400 leading-none">{todayCount}</span>
+          <span className="text-[0.75rem] text-[#64748b] dark:text-slate-400 uppercase tracking-[1px] mb-[4px] font-extrabold">Today's Actions</span>
+          <span className="text-[2rem] font-black text-[#047857] dark:text-emerald-400 leading-none">{todayCount}</span>
         </div>
       </div>
     </div>

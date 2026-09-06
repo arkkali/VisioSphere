@@ -35,46 +35,56 @@ const PasswordCard = ({ onSubmit }) => {
 
   return (
     <div className="flex flex-col gap-[16px]">
-      <h4 className="m-0 text-[1rem] text-[#00212e] dark:text-white font-bold border-b border-[#f1f5f9] dark:border-slate-700 pb-[8px]">Change Password</h4>
+      <h3 className="m-0 text-[1rem] text-[#00212e] dark:text-white font-bold border-b border-[#f1f5f9] dark:border-slate-700 pb-[8px]">Change Password</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[16px]">
         <div className="flex flex-col gap-[8px]">
-          <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Current Password</label>
+          {/* Visible labels that were never associated with their fields, so
+              each input announced with no name. htmlFor also makes the label
+              text clickable. */}
+          <label htmlFor="settings-current-password" className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Current Password</label>
           <div className="relative">
             <input
+              id="settings-current-password"
               type={showCurrent ? 'text' : 'password'}
               value={passwords.currentPassword}
               onChange={(e) => setPasswords({ ...passwords, currentPassword: e.target.value })}
               className="w-full p-[12px_40px_12px_16px] bg-white dark:bg-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-600 rounded-[8px] text-[1rem] text-[#00212e] dark:text-white outline-none focus:border-[#00a8e8] dark:focus:border-[#00a8e8] transition-colors box-border"
             />
-            <button type="button" onClick={() => setShowCurrent(!showCurrent)} className="absolute right-[12px] top-[14px] bg-transparent border-none text-[#94a3b8] dark:text-slate-400 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0">
+            {/* 24x24 is the WCAG 2.2 minimum target size (Lighthouse: "Touch
+                targets do not have sufficient size or spacing"). The icon is
+                still 20px — the button box around it grew, and the offsets moved
+                2px to keep the icon centred exactly where it was. */}
+            <button type="button" aria-label={showCurrent ? 'Hide current password' : 'Show current password'} aria-pressed={showCurrent} onClick={() => setShowCurrent(!showCurrent)} className="absolute right-[10px] top-[12px] w-[24px] h-[24px] flex items-center justify-center bg-transparent border-none text-[#94a3b8] dark:text-slate-400 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0">
               {showCurrent ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </div>
         </div>
         <div className="flex flex-col gap-[8px]">
-          <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">New Password</label>
+          <label htmlFor="settings-new-password" className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">New Password</label>
           <div className="relative">
             <input
+              id="settings-new-password"
               type={showNew ? 'text' : 'password'}
               value={passwords.newPassword}
               onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })}
               className="w-full p-[12px_40px_12px_16px] bg-white dark:bg-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-600 rounded-[8px] text-[1rem] text-[#00212e] dark:text-white outline-none focus:border-[#00a8e8] dark:focus:border-[#00a8e8] transition-colors box-border"
             />
-            <button type="button" onClick={() => setShowNew(!showNew)} className="absolute right-[12px] top-[14px] bg-transparent border-none text-[#94a3b8] dark:text-slate-400 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0">
+            <button type="button" aria-label={showNew ? 'Hide new password' : 'Show new password'} aria-pressed={showNew} onClick={() => setShowNew(!showNew)} className="absolute right-[10px] top-[12px] w-[24px] h-[24px] flex items-center justify-center bg-transparent border-none text-[#94a3b8] dark:text-slate-400 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0">
               {showNew ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </div>
         </div>
         <div className="flex flex-col gap-[8px]">
-          <label className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Confirm New Password</label>
+          <label htmlFor="settings-confirm-password" className="text-[0.85rem] font-bold text-[#475569] dark:text-slate-300 uppercase tracking-[0.5px]">Confirm New Password</label>
           <div className="relative">
             <input
+              id="settings-confirm-password"
               type={showConfirm ? 'text' : 'password'}
               value={passwords.confirmPassword}
               onChange={(e) => setPasswords({ ...passwords, confirmPassword: e.target.value })}
               className="w-full p-[12px_16px] pr-[44px] bg-white dark:bg-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-600 rounded-[8px] text-[1rem] text-[#00212e] dark:text-white outline-none focus:border-[#00a8e8] dark:focus:border-[#00a8e8] transition-colors box-border"
             />
-            <button type="button" onClick={() => setShowConfirm(!showConfirm)} className="absolute right-[12px] top-[14px] bg-transparent border-none text-[#94a3b8] dark:text-slate-400 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0">
+            <button type="button" aria-label={showConfirm ? 'Hide confirmed password' : 'Show confirmed password'} aria-pressed={showConfirm} onClick={() => setShowConfirm(!showConfirm)} className="absolute right-[10px] top-[12px] w-[24px] h-[24px] flex items-center justify-center bg-transparent border-none text-[#94a3b8] dark:text-slate-400 cursor-pointer hover:text-[#00212e] dark:hover:text-white p-0">
               {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </div>

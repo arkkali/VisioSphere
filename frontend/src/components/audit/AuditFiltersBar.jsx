@@ -22,6 +22,7 @@ const AuditFiltersBar = ({
         </svg>
         <input
           type="text"
+          aria-label="Search logs by event, actor, or details"
           placeholder="Search logs by event, actor, or details..."
           value={searchQuery}
           onChange={(e) => { setSearchQuery(e.target.value); onPageReset(); }}
@@ -31,8 +32,9 @@ const AuditFiltersBar = ({
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-[16px] items-end">
         <div className="flex flex-col gap-[8px]">
-          <label className={LABEL_CLASS}>Category</label>
+          <label htmlFor="audit-filter-category" className={LABEL_CLASS}>Category</label>
           <select
+            id="audit-filter-category"
             value={filterCategory}
             onChange={(e) => { setFilterCategory(e.target.value); onPageReset(); }}
             className={SELECT_CLASS}
@@ -44,8 +46,9 @@ const AuditFiltersBar = ({
         </div>
 
         <div className="flex flex-col gap-[8px]">
-          <label className={LABEL_CLASS}>Status</label>
+          <label htmlFor="audit-filter-status" className={LABEL_CLASS}>Status</label>
           <select
+            id="audit-filter-status"
             value={filterStatus}
             onChange={(e) => { setFilterStatus(e.target.value); onPageReset(); }}
             className={SELECT_CLASS}
@@ -59,8 +62,9 @@ const AuditFiltersBar = ({
         </div>
 
         <div className="flex flex-col gap-[8px]">
-          <label className={LABEL_CLASS}>Date Range</label>
+          <label htmlFor="audit-filter-date" className={LABEL_CLASS}>Date Range</label>
           <select
+            id="audit-filter-date"
             value={dateFilter}
             onChange={(e) => { setDateFilter(e.target.value); onPageReset(); }}
             className={SELECT_CLASS}

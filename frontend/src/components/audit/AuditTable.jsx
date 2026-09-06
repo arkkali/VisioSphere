@@ -26,11 +26,11 @@ const AuditTable = ({
 
       <div className="overflow-x-auto min-h-[400px]">
         {loading ? (
-          <div className="p-[60px] text-center text-[#94a3b8] dark:text-slate-500 font-medium text-[1rem]">
+          <div className="p-[60px] text-center text-[#64748b] dark:text-slate-400 font-medium text-[1rem]">
             Loading secure audit logs...
           </div>
         ) : filteredLogs.length === 0 ? (
-          <div className="p-[60px] text-center text-[#94a3b8] dark:text-slate-500 font-medium text-[1rem]">
+          <div className="p-[60px] text-center text-[#64748b] dark:text-slate-400 font-medium text-[1rem]">
             No logs match the current filters.
           </div>
         ) : (
@@ -54,16 +54,16 @@ const AuditTable = ({
                   <tr key={log._id} className="border-b border-[#f1f5f9] dark:border-slate-700 transition-colors duration-150 hover:bg-[#f8fafc] dark:hover:bg-slate-800/50">
                     <td className="p-[16px_20px] align-middle">
                       <div className="flex flex-col gap-[2px]">
-                        <span className="font-bold text-[#00a8e8] dark:text-[#38bdf8]">
+                        <span className="font-bold text-[#0075a2] dark:text-[#38bdf8]">
                           {logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </span>
-                        <span className="text-[0.75rem] font-medium text-[#64748b] dark:text-slate-500">
+                        <span className="text-[0.75rem] font-medium text-[#64748b] dark:text-slate-400">
                           {logDate.toLocaleDateString()}
                         </span>
                       </div>
                     </td>
                     <td className="p-[16px_20px] align-middle">
-                      <span className="inline-block p-[4px_10px] bg-[#e1f5fe] dark:bg-[#0284c7]/20 rounded-[6px] text-[#0284c7] dark:text-[#38bdf8] font-bold text-[0.75rem] tracking-[0.5px] uppercase">
+                      <span className="inline-block p-[4px_10px] bg-[#e1f5fe] dark:bg-[#0284c7]/20 rounded-[6px] text-[#00688f] dark:text-[#38bdf8] font-bold text-[0.75rem] tracking-[0.5px] uppercase">
                         {log.category}
                       </span>
                     </td>

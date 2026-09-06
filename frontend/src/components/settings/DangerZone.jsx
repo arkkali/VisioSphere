@@ -20,12 +20,12 @@ const DangerZone = ({ activeModal, onOpenModal, onCloseModal, onConfirmDeactivat
   <>
     <div className="bg-[#fff1f2] dark:bg-rose-950/20 border border-[#fecaca] dark:border-rose-900/50 rounded-[16px] overflow-hidden transition-colors duration-300">
       <div className="p-[20px_24px] border-b border-[#fecaca] dark:border-rose-900/50 flex items-center gap-[12px]">
-        <h3 className="m-0 text-[1.2rem] text-[#e11d48] dark:text-rose-400 font-extrabold">Danger Zone</h3>
+        <h2 className="m-0 text-[1.2rem] text-[#e11d48] dark:text-rose-400 font-extrabold">Danger Zone</h2>
       </div>
       <div className="p-[24px] flex flex-col md:flex-row justify-between items-start md:items-center gap-[16px]">
         <div>
-          <h4 className="m-0 text-[1rem] text-[#00212e] dark:text-slate-200 font-bold mb-[4px]">Deactivate Account</h4>
-          <p className="text-[0.9rem] text-[#64748b] dark:text-slate-400 m-0 max-w-[500px]">Temporarily disable your access. You will be logged out immediately and will require another administrator to reactivate your profile.</p>
+          <h3 className="m-0 text-[1rem] text-[#00212e] dark:text-slate-200 font-bold mb-[4px]">Deactivate Account</h3>
+          <p className="text-[0.9rem] text-[#475569] dark:text-slate-400 m-0 max-w-[500px]">Temporarily disable your access. You will be logged out immediately and will require another administrator to reactivate your profile.</p>
         </div>
         <button onClick={() => onOpenModal('deactivate')} className="p-[12px_20px] bg-[#e11d48] text-white border-none rounded-[8px] font-bold text-[0.95rem] cursor-pointer hover:bg-[#be123c] transition-colors whitespace-nowrap shadow-[0_4px_12px_rgba(225,29,72,0.25)] hover:-translate-y-[1px]">Deactivate Account</button>
       </div>

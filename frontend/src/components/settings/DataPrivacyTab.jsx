@@ -40,7 +40,7 @@ const DataPrivacyTab = ({ onMessage }) => {
       <div className="bg-gradient-to-br from-[#f8fafc] to-[#f1f5f9] dark:from-slate-800 dark:to-slate-900 border-[2px] border-[#cbd5e1] dark:border-slate-700 rounded-[16px] overflow-hidden shadow-sm transition-colors duration-300">
         <div className="p-[24px] border-b border-[#cbd5e1] dark:border-slate-700 flex items-center gap-[12px]">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" className="text-[#00212e] dark:text-white" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-          <h3 className="m-0 text-[1.3rem] text-[#00212e] dark:text-white font-black tracking-[-0.5px]">Global Data Compliance</h3>
+          <h2 className="m-0 text-[1.3rem] text-[#00212e] dark:text-white font-black tracking-[-0.5px]">Global Data Compliance</h2>
         </div>
 
         <div className="p-[32px] flex flex-col gap-[32px]">
@@ -52,7 +52,7 @@ const DataPrivacyTab = ({ onMessage }) => {
           </div>
 
           <div className="flex flex-col gap-[8px]">
-            <h4 className="m-0 text-[1.1rem] text-[#00212e] dark:text-white font-extrabold">CCTV Video Retention Policy</h4>
+            <h3 className="m-0 text-[1.1rem] text-[#00212e] dark:text-white font-extrabold">CCTV Video Retention Policy</h3>
             <p className="text-[#64748b] dark:text-slate-400 m-0 text-[0.95rem]">Automatic permanent deletion cycle for recorded facility footage.</p>
             <div className="mt-[8px] flex items-center gap-[12px]">
               <input type="text" value="30 Days" disabled className="p-[12px_16px] bg-[#e2e8f0] dark:bg-slate-800 border-[2px] border-[#cbd5e1] dark:border-slate-600 text-[#475569] dark:text-slate-300 font-black text-[1rem] rounded-[8px] w-[120px] text-center cursor-not-allowed opacity-80" />
@@ -65,7 +65,7 @@ const DataPrivacyTab = ({ onMessage }) => {
           <div className="flex flex-col gap-[12px]">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-[12px]">
               <div className="flex flex-col gap-[8px]">
-                <h4 className="m-0 text-[1.1rem] text-[#00212e] dark:text-white font-extrabold">Audit Trail Auto-Archive</h4>
+                <h3 className="m-0 text-[1.1rem] text-[#00212e] dark:text-white font-extrabold">Audit Trail Auto-Archive</h3>
                 <p className="text-[#64748b] dark:text-slate-400 m-0 text-[0.95rem]">Every 30 days, logs are exported to a structured Excel file and purged from the database.</p>
                 <div className="mt-[4px] flex items-center gap-[12px]">
                   <input type="text" value="30 Days" disabled className="p-[12px_16px] bg-[#e2e8f0] dark:bg-slate-800 border-[2px] border-[#cbd5e1] dark:border-slate-600 text-[#475569] dark:text-slate-300 font-black text-[1rem] rounded-[8px] w-[120px] text-center cursor-not-allowed opacity-80" />

@@ -1,7 +1,7 @@
 export const STATUS_CLASSES = {
-  success: 'bg-[#f0fdf4] dark:bg-emerald-950/30 text-[#10b981] dark:text-emerald-400',
-  alert: 'bg-[#fffbeb] dark:bg-amber-950/30 text-[#d97706] dark:text-amber-500',
-  failed: 'bg-[#fff1f2] dark:bg-rose-950/30 text-[#e11d48] dark:text-rose-400',
+  success: 'bg-[#f0fdf4] dark:bg-emerald-950/30 text-[#047857] dark:text-emerald-400',
+  alert: 'bg-[#fffbeb] dark:bg-amber-950/30 text-[#b45309] dark:text-amber-500',
+  failed: 'bg-[#fff1f2] dark:bg-rose-950/30 text-[#be123c] dark:text-rose-400',
 };
 
 export const getStatusText = (status) => {
