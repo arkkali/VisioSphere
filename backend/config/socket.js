@@ -5,7 +5,7 @@ const { dispatchIncidentPushToStaff } = require('../services/notificationService
 const { facilityForCamera, roomFor } = require('./facilities');
 const { runWithFacility } = require('../models/plugins/facilityScope');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const parseAlert = (payload = {}) => {
   const { type, message = '', location = 'Unknown', alertKey, clipPath } = payload;

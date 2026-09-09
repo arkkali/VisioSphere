@@ -6,7 +6,7 @@ const AuditLog = require('../models/AuditLog');
 const { SESSION_TTL } = require('../config/session');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const throwError = (message, status) => {
   const err = new Error(message);

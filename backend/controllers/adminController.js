@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const adminAuthService = require('../services/adminAuthService');
 const adminService = require('../services/adminService');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 exports.login = async (req, res, next) => {
   try {

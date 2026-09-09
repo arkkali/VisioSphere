@@ -3,7 +3,7 @@ const { isFacility } = require('../config/facilities');
 const { RENEWED_TOKEN_HEADER, renewedTokenFor } = require('../config/session');
 const { runWithFacility, runUnscoped } = require('../models/plugins/facilityScope');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 /**
  * Verifies the JWT and runs the REST of the request inside that user's

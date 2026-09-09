@@ -39,7 +39,7 @@
 
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 /** Lifetime of a freshly minted access token. Any ms/jwt duration string. */
 const SESSION_TTL = process.env.SESSION_TTL || '7d';
