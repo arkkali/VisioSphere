@@ -28,6 +28,7 @@ const path = require('path');
 const {
   signClipToken,
   signClipDeleteToken,
+  signClipDownloadToken,
   isSafeClipFilename,
 } = require('../utils/clipToken');
 
@@ -117,6 +118,35 @@ async function getSignedClipUrl(incident) {
     `?token=${encodeURIComponent(token)}`;
 
   return { url, expiresIn };
+}
+
+
+/**
+ * Mint a short-lived, resource-bound DOWNLOAD URL for one incident's clip.
+ *
+ * Same bytes as getSignedClipUrl, different token action and a `download=1`
+ * flag, which together make ai_core answer with Content-Disposition:
+ * attachment instead of streaming inline. See utils/clipToken.js for why this
+ * is a separate action rather than a flag on the playback token.
+ *
+ * The saved filename is decided by ai_core's Content-Disposition, not by the
+ * browser: an <a download="..."> attribute is ignored for a cross-origin
+ * response, and the clip origin (the tunnel) is not the dashboard's origin.
+ * `filename` comes back anyway so the caller can show what is being saved.
+ *
+ * @param {object} incident - an already facility-scoped Incident
+ * @returns {Promise<{ url: string, filename: string, expiresIn: number } | null>}
+ *   null when the incident has no usable clip, exactly as getSignedClipUrl.
+ */
+async function getSignedDownloadUrl(incident) {
+  const filename = clipFilename(incident && incident.clipPath);
+  if (!filename) return null;
+  requireBaseUrl();
+
+  const { token, expiresIn } = signClipDownloadToken(filename);
+  const url = `${buildUrl(filename, token)}&download=1`;
+
+  return { url, filename, expiresIn };
 }
 
 
@@ -234,6 +264,7 @@ async function deleteClip(incident) {
 
 module.exports = {
   getSignedClipUrl,
+  getSignedDownloadUrl,
   getSignedPosterUrl,
   getSignedPosterUrls,
   deleteClip,

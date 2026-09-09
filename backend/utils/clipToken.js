@@ -64,7 +64,7 @@ const ATTACHMENT_VIEW_TTL = parseInt(
 // `view` tokens, which end up in their browser history and network tab; if one
 // of those could be replayed as a `write`, opening a resident's report would be
 // enough to overwrite their file.
-const VERSION_FOR = { play: 'v1', delete: 'v1d', view: 'v1u', write: 'v1w' };
+const VERSION_FOR = { play: 'v1', delete: 'v1d', download: 'v1g', view: 'v1u', write: 'v1w' };
 
 function _sign(message) {
   return crypto.createHmac('sha256', SECRET).update(message).digest('hex');
@@ -141,6 +141,23 @@ function signClipDeleteToken(filename, ttlSeconds = 60) {
 }
 
 /**
+ * Mint a token authorising DOWNLOAD (save-to-disk) of one clip.
+ *
+ * Separate from the play token on purpose. `?download=1` on ai_core flips
+ * Content-Disposition to attachment; if a playback token satisfied that check,
+ * any nurse who can watch a clip could export it by appending a query
+ * parameter, and authorizeRoles('Facility Admin') on the download route would
+ * mean nothing. Because the version prefix is part of the signed message, a
+ * play token simply fails the download check.
+ *
+ * TTL matches playback: the token is minted on click and spent immediately,
+ * but must outlive the transfer itself, not just the first byte.
+ */
+function signClipDownloadToken(filename, ttlSeconds = DEFAULT_TTL) {
+  return signClipToken(filename, ttlSeconds, 'download');
+}
+
+/**
  * Verify a token against the filename it claims to authorize. Kept here for
  * completeness and unit tests; in production ai_core does the verifying (see
  * _verify_clip_token in cctv_core.py, which mirrors this byte for byte).
@@ -174,6 +191,7 @@ module.exports = {
   signUploadToken,
   signClipToken,
   signClipDeleteToken,
+  signClipDownloadToken,
   verifyClipToken,
   isSafeClipFilename,
 };

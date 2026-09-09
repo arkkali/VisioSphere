@@ -133,6 +133,63 @@ const auditService = require('../services/auditService');
     }
   }
 
+  /**
+   * GET /api/incidents/:id/download-url
+   *
+   * Signed URL that saves this incident's clip to disk. Facility Admin only --
+   * enforced by authorizeRoles in incidentRoutes.js, and independently by the
+   * download-scoped token, which a playback token cannot substitute for.
+   *
+   * Audit-logged. Exporting CCTV footage of a resident off the system is
+   * exactly the kind of act an audit trail exists to record: the copy leaves
+   * the facility's control the moment it lands in someone's Downloads folder,
+   * and after that nothing here can account for it.
+   *
+   * Logged at the point the URL is ISSUED, not when the bytes finish moving --
+   * this process never sees the transfer, which goes straight from the mini PC
+   * to the browser. So the entry records intent to export, and a download the
+   * user then cancels still appears. That is the safer direction to be wrong in.
+   *
+   * FACILITY SAFETY: same as getVideoUrl -- the lookup is facility-scoped, so
+   * an admin of one facility asking for the other's incident gets a 404 here
+   * and no token is ever minted.
+   */
+  async function getVideoDownloadUrl(req, res, next) {
+    try {
+      const incident = await incidentService.getIncidentById(req.params.id);
+      if (!incident) {
+        const err = new Error('Incident not found');
+        err.status = 404;
+        throw err;
+      }
+
+      const result = await videoService.getSignedDownloadUrl(incident);
+      if (!result) {
+        return res.status(404).json({ message: 'No clip available for this incident yet' });
+      }
+
+      const actor = actorFrom(req);
+      await auditService.create({
+        category: 'Incident',
+        event: 'Clip Downloaded',
+        ...actor,
+        purpose: 'Export a recorded event clip off the system',
+        status: 'success',
+        oldValues: null,
+        newValues: {
+          incidentId: String(incident._id),
+          incidentType: incident.incidentType,
+          location: incident.location,
+          filename: result.filename,
+        },
+      }).catch((err) => console.error('[audit] clip download log failed:', err.message));
+
+      res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   /** Name to record in the audit trail for whoever is making this request. */
   function actorFrom(req) {
     return {
@@ -271,6 +328,7 @@ const auditService = require('../services/auditService');
     dismissIncident,
     resolveIncident,
     getVideoUrl,
+    getVideoDownloadUrl,
     getThumbnailUrls,
     updateClip,
     deleteClip
