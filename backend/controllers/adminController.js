@@ -67,6 +67,39 @@ exports.getOne = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Every other :id endpoint here trusts the path parameter, so any signed-in
+// account can act on any admin's id. That is a pre-existing problem and not
+// one to fix silently under this feature — but a NEW endpoint should not
+// inherit it, and least of all this one: the whole point of the OTP is that
+// nobody but the account holder can move the address. The JWT carries
+// customId (see adminAuthService jwt.sign), so bind the two.
+const requireSelf = (req) => {
+  if (!req.user || req.user.customId !== req.params.id) {
+    const err = new Error('You can only change the email address on your own account.');
+    err.status = 403;
+    throw err;
+  }
+};
+
+exports.requestEmailChange = async (req, res, next) => {
+  try {
+    requireSelf(req);
+    const result = await adminService.requestEmailChange(req.params.id, req.body.email);
+    res.status(200).json({
+      message: `Verification code sent to ${result.pendingEmail}.`,
+      ...result
+    });
+  } catch (err) { next(err); }
+};
+
+exports.verifyEmailChange = async (req, res, next) => {
+  try {
+    requireSelf(req);
+    const result = await adminService.verifyEmailChange(req.params.id, req.body.code);
+    res.status(200).json({ message: 'Email address updated.', ...result });
+  } catch (err) { next(err); }
+};
+
 exports.getStats = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;

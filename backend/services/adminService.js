@@ -1,11 +1,24 @@
 const bcryptjs = require('bcryptjs');
+const { Resend } = require('resend');
 const Admin = require('../models/Admin');
 const Nurse = require('../models/Nurse');
+const Guardian = require('../models/Guardian');
 const Resident = require('../models/Resident');
 const Incident = require('../models/Incident');
 const AuditLog = require('../models/AuditLog');
 const { CAMERA_FACILITY, DEFAULT_FACILITY } = require('../config/facilities');
-const { currentFacility } = require('../models/plugins/facilityScope');
+const { currentFacility, runUnscoped } = require('../models/plugins/facilityScope');
+
+// Built on first use, not at import. `new Resend(undefined)` throws, and
+// adminService is required from far more places than adminAuthService is
+// (dashboard, stats, cron) — several of which have no reason to have loaded
+// mail credentials. Failing there would take down endpoints that never send
+// an email.
+let _resend = null;
+const mailer = () => {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+};
 
 // ── Camera liveness ──────────────────────────────────────────────────────────
 // This used to be `cameras: { online: 2, total: 2 }` — a literal, hardcoded on
@@ -125,7 +138,10 @@ exports.getAll = () =>
   Admin.find({ role: 'Facility Admin' }).select('-password');
 
 exports.getOne = async (customId) => {
-  const admin = await Admin.findOne({ customId, role: 'Facility Admin' }).select('-password');
+  // -password was the only exclusion, so this response also carried otpCode,
+  // twoFaPin and (now) emailOtpCode — live secrets, handed to whoever asked.
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' })
+    .select('-password -otpCode -twoFaPin -emailOtpCode');
   if (!admin) throwError('Admin not found', 404);
   return admin;
 };
@@ -205,12 +221,26 @@ exports.uploadProfilePic = async (customId, imageBase64) => {
   });
 };
 
+// The settings screens only ever send these three. Everything else that
+// reached this endpoint was written straight through — `email` (which is what
+// the OTP flow below exists to protect), but also `password`, `role`,
+// `status`, `customId` and `is2FAEnabled`. Anything not listed here is now
+// dropped rather than persisted.
+const PROFILE_FIELDS = ['name', 'theme', 'enableSidebarToggle'];
+
 exports.updateProfile = async (customId, updateData) => {
+  const safeUpdate = {};
+  for (const field of PROFILE_FIELDS) {
+    if (updateData && Object.prototype.hasOwnProperty.call(updateData, field)) {
+      safeUpdate[field] = updateData[field];
+    }
+  }
+
   const admin = await Admin.findOneAndUpdate(
     { customId, role: 'Facility Admin' },
-    updateData,
+    safeUpdate,
     { returnDocument: 'after' }
-  ).select('-password');
+  ).select('-password -otpCode -twoFaPin -emailOtpCode');
 
   if (!admin) throwError('Admin not found', 404);
 
@@ -221,6 +251,176 @@ exports.updateProfile = async (customId, updateData) => {
   });
 
   return admin;
+};
+
+
+// ── Email change (OTP-verified) ──────────────────────────────────────────────
+//
+// Admin.email is `required: true, unique: true`, so every admin already HAS an
+// address — but the seeded accounts carry placeholders nobody can receive mail
+// at, which quietly breaks password reset (adminAuthService.requestOtp mails
+// that address). This is how an admin replaces it with one they own.
+//
+// The proof of ownership is the whole point: the new address is parked in
+// `pendingEmail` and only promoted to `email` once a code mailed TO it comes
+// back. Writing it directly would let anyone with a logged-in session move the
+// account to an address they control and then "forget" the password.
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
+const EMAIL_OTP_MAX_ATTEMPTS = 5;
+
+// Each role lives in its own collection with its own unique index, so nothing
+// at the database level stops an admin from claiming a nurse's address. It
+// matters because login resolves an email by trying admin, then nurses, then
+// guardians in order (see the mobile AuthProvider and each *AuthService):
+// a duplicate would shadow whichever account is tried second.
+//
+// runUnscoped because uniqueness is a global property. A Graces admin taking a
+// Saint Anthony nurse's address is still a collision, and a facility-scoped
+// query would not see it.
+const emailInUse = async (email, exceptAdminCustomId) => runUnscoped(async () => {
+  const [admin, nurse, guardian] = await Promise.all([
+    Admin.findOne({ email, customId: { $ne: exceptAdminCustomId } }).select('_id'),
+    Nurse.findOne({ email }).select('_id'),
+    Guardian.findOne({ email }).select('_id'),
+  ]);
+  return Boolean(admin || nurse || guardian);
+});
+
+const clearPendingEmail = (admin) => {
+  admin.pendingEmail     = null;
+  admin.emailOtpCode     = null;
+  admin.emailOtpExpiry   = null;
+  admin.emailOtpAttempts = 0;
+};
+
+exports.requestEmailChange = async (customId, rawEmail) => {
+  const email = String(rawEmail || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) throwError('Enter a valid email address.', 400);
+
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
+  if (!admin) throwError('Admin not found', 404);
+
+  if ((admin.email || '').toLowerCase() === email)
+    throwError('That is already your email address.', 400);
+
+  if (await emailInUse(email, customId))
+    throwError('That email address is already used by another account.', 409);
+
+  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  admin.pendingEmail     = email;
+  admin.emailOtpCode     = otpCode;
+  admin.emailOtpExpiry   = new Date(Date.now() + EMAIL_OTP_TTL_MS);
+  admin.emailOtpAttempts = 0;
+  await admin.save();
+
+  const { error } = await mailer().emails.send({
+    from: process.env.MAIL_FROM || 'onboarding@resend.dev',
+    to: email,
+    subject: 'VisioSphere - Confirm your new email address',
+    html: `<div style="font-family:sans-serif;text-align:center;padding:20px;">
+             <h2>Confirm your VisioSphere email</h2>
+             <p>Enter this code in Settings to finish moving your admin account
+                (<strong>${admin.customId}</strong>) to this address:</p>
+             <h1 style="color:#00a8e8;letter-spacing:5px;">${otpCode}</h1>
+             <p>This code expires in 10 minutes.</p>
+             <p style="color:#64748b;font-size:12px;">
+               If you did not request this, you can ignore this email — the
+               change is not applied until the code is entered.</p>
+           </div>`
+  });
+
+  if (error) {
+    // Leaving a live code parked against an address that never received it is
+    // worse than failing outright: the admin cannot proceed and cannot retry
+    // cleanly either.
+    clearPendingEmail(admin);
+    await admin.save();
+    console.error('[Resend] Admin email-change OTP send failed:', error);
+    throwError('Could not send the verification code to that address.', 502);
+  }
+
+  await AuditLog.create({
+    category: 'Account Management', event: 'Email Change Requested',
+    actorName: admin.name, actorRole: 'Facility Admin',
+    purpose: 'Admin requested a verified change of account email',
+    status: 'success',
+    oldValues: { email: admin.email },
+    newValues: { pendingEmail: email },
+    facility: admin.facility
+  });
+
+  return { pendingEmail: email, expiresAt: admin.emailOtpExpiry };
+};
+
+exports.verifyEmailChange = async (customId, rawCode) => {
+  const code = String(rawCode || '').trim();
+
+  const admin = await Admin.findOne({ customId, role: 'Facility Admin' });
+  if (!admin) throwError('Admin not found', 404);
+
+  if (!admin.pendingEmail)
+    throwError('No email change is pending. Request a code first.', 400);
+
+  if (!admin.emailOtpExpiry || new Date() > admin.emailOtpExpiry) {
+    clearPendingEmail(admin);
+    await admin.save();
+    throwError('That code has expired. Request a new one.', 400);
+  }
+
+  if (admin.emailOtpAttempts >= EMAIL_OTP_MAX_ATTEMPTS) {
+    clearPendingEmail(admin);
+    await admin.save();
+    throwError('Too many incorrect codes. Request a new one.', 429);
+  }
+
+  if (admin.emailOtpCode !== code) {
+    admin.emailOtpAttempts += 1;
+    await admin.save();
+
+    await AuditLog.create({
+      category: 'Account Management', event: 'Failed Email Change Verification',
+      actorName: admin.name, actorRole: 'Facility Admin',
+      purpose: 'Security monitoring', status: 'failed',
+      newValues: {
+        reason: 'Invalid verification code',
+        attemptsRemaining: EMAIL_OTP_MAX_ATTEMPTS - admin.emailOtpAttempts
+      },
+      facility: admin.facility
+    });
+
+    throwError('Incorrect code. Please check the email and try again.', 400);
+  }
+
+  // Re-checked here, not only at request time: the code is valid for ten
+  // minutes, and another account could have claimed the address inside that
+  // window. Without this the save would either throw a raw duplicate-key
+  // error or (across collections, where no index spans them) succeed and
+  // leave two accounts sharing one login address.
+  if (await emailInUse(admin.pendingEmail, customId)) {
+    const taken = admin.pendingEmail;
+    clearPendingEmail(admin);
+    await admin.save();
+    throwError(`${taken} was claimed by another account. Try a different address.`, 409);
+  }
+
+  const previousEmail = admin.email;
+  admin.email = admin.pendingEmail;
+  clearPendingEmail(admin);
+  await admin.save();
+
+  await AuditLog.create({
+    category: 'Account Management', event: 'Email Changed',
+    actorName: admin.name, actorRole: 'Facility Admin',
+    purpose: 'Admin verified and applied a new account email',
+    status: 'success',
+    oldValues: { email: previousEmail },
+    newValues: { email: admin.email },
+    facility: admin.facility
+  });
+
+  return { email: admin.email };
 };
 
 exports.changePassword = async (customId, oldPassword, newPassword) => {

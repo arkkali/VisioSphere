@@ -10,6 +10,18 @@ const adminSchema = new mongoose.Schema({
   isFirstLogin:  { type: Boolean, default: true },
   otpCode:       { type: String, default: null },
   otpExpiry:     { type: Date, default: null },
+  // Email-change verification. Deliberately NOT the otpCode/otpExpiry pair
+  // above: those belong to password reset, and sharing one slot would let a
+  // reset code confirm an email change (and vice versa), so a code mailed for
+  // one purpose could be replayed for the other.
+  //
+  // pendingEmail is intentionally not `unique` — every admin who is not
+  // mid-change holds null here, and a unique index would collide on the
+  // second null.
+  pendingEmail:     { type: String, default: null },
+  emailOtpCode:     { type: String, default: null },
+  emailOtpExpiry:   { type: Date,   default: null },
+  emailOtpAttempts: { type: Number, default: 0 },
   is2FAEnabled:  { type: Boolean, default: false },
   twoFaPin:      { type: String, default: null },
   profilePic:    { type: String, default: null },

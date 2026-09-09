@@ -16,6 +16,11 @@ router.get('/stats/:adminId',      verifyToken, readLimiter,   ctrl.getStats);
 router.get('/:id',                 verifyToken, readLimiter,   ctrl.getOne);
 router.put('/:id/profile',         verifyToken, writeLimiter,  ctrl.updateProfile);
 router.put('/:id/change-password', verifyToken, writeLimiter,  ctrl.changePassword);
+// authLimiter, not writeLimiter: the request leg sends mail to an address the
+// caller supplies, so it is a spam lever, and the verify leg is a 6-digit
+// guess. Both belong on the tighter bucket.
+router.post('/:id/email/request',  verifyToken, authLimiter,   ctrl.requestEmailChange);
+router.post('/:id/email/verify',   verifyToken, authLimiter,   ctrl.verifyEmailChange);
 router.put('/:id/deactivate',      verifyToken, writeLimiter,  ctrl.deactivate);
 router.post('/:id/toggle-2fa',     verifyToken, writeLimiter,  ctrl.toggle2FA);
 router.post('/:id/link-nurse',     verifyToken, writeLimiter,  ctrl.linkNurse);
