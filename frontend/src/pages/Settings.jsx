@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useTheme } from '../context/ThemeContext';
 import ProfileCard from '../components/settings/ProfileCard';
+import EmailCard from '../components/settings/EmailCard';
 import PasswordCard from '../components/settings/PasswordCard';
 import TwoFACard from '../components/settings/TwoFACard';
 import NurseLinkCard from '../components/settings/NurseLinkCard';
@@ -14,6 +15,8 @@ import {
   fetchLinkedNurseProfile,
   saveAdminProfile,
   saveNurseProfile,
+  requestAdminEmailChange,
+  verifyAdminEmailChange,
   changeAdminPassword,
   changeNursePassword,
   toggle2FA,
@@ -51,6 +54,7 @@ const Settings = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   const [displayName, setDisplayName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
   const [theme, setTheme] = useState('default');
   const [is2FAEnabled, setIs2FAEnabled] = useState(false);
   const [linkedNurseId, setLinkedNurseId] = useState('');
@@ -142,6 +146,7 @@ const Settings = () => {
         localStorage.setItem('enableSidebarToggle', String(sidebarEnabled));
 
         setDisplayName(adminData.name || '');
+        setAdminEmail(adminData.email || '');
         setTheme(adminTheme);
       } catch {
         showMessage('Failed to load profile settings.', 'error');
@@ -347,6 +352,18 @@ const Settings = () => {
     }
   };
 
+  const handleRequestEmailCode = async (email) => {
+    await requestAdminEmailChange(getAdminId(), email);
+  };
+
+  const handleVerifyEmailCode = async (code) => {
+    const result = await verifyAdminEmailChange(getAdminId(), code);
+    // Reflect it immediately: the card collapses back to "Current Address" on
+    // success, and a stale value there would read as the change not applying.
+    setAdminEmail(result.email || '');
+    showMessage('Email address updated.');
+  };
+
   const handleDeactivateAccount = async () => {
     const adminId = getAdminId();
     if (isNurseView) {
@@ -446,6 +463,18 @@ const Settings = () => {
                     onThemeChange={setTheme}
                     onSave={handleSaveProfile}
                   />
+
+                  {/* Admin only. The nurse view of this page is a different
+                      account entirely (resolvedNurseId), and the endpoints
+                      behind this card are /admin/:id/email/*. */}
+                  {!isNurseView && (
+                    <EmailCard
+                      currentEmail={adminEmail}
+                      onRequestCode={handleRequestEmailCode}
+                      onVerifyCode={handleVerifyEmailCode}
+                      onMessage={showMessage}
+                    />
+                  )}
 
                   <div className="bg-white dark:bg-slate-800 border border-[#e2e8f0] dark:border-slate-700 rounded-[16px] overflow-hidden shadow-sm transition-colors duration-300">
                     <div className="p-[20px_24px] border-b border-[#e2e8f0] dark:border-slate-700 bg-[#f8fafc] dark:bg-slate-900/50">

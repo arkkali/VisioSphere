@@ -25,6 +25,19 @@ export const saveNurseProfile = async (nurseId, payload) => {
   return data;
 };
 
+// Two legs, deliberately. The address is parked server-side as `pendingEmail`
+// by the first call and only becomes the account's real email once a code
+// mailed to it is handed back by the second.
+export const requestAdminEmailChange = async (adminId, email) => {
+  const { data } = await axiosInstance.post(`/admin/${adminId}/email/request`, { email });
+  return data;
+};
+
+export const verifyAdminEmailChange = async (adminId, code) => {
+  const { data } = await axiosInstance.post(`/admin/${adminId}/email/verify`, { code });
+  return data;
+};
+
 export const changeAdminPassword = async (adminId, oldPassword, newPassword) => {
   const { data } = await axiosInstance.put(`/admin/${adminId}/change-password`, {
     oldPassword,
