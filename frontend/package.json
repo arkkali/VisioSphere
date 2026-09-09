@@ -17,6 +17,7 @@
     "@mui/x-charts": "^9.0.4",
     "@mui/x-data-grid": "^9.0.4",
     "axios": "^1.13.6",
+    "dompurify": "^3.3.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",

@@ -93,11 +93,11 @@ const PONG_WAIT_MS = 300;
 /**
  * Keys that outlive a session, listed explicitly rather than by clearing
  * everything else — the same shape as the mobile app's preserveAcrossLogout.
- * Theme is a device preference, and the remembered sign-in id and password are
- * the "remember me" box the user ticked on purpose; wiping either on sign-out
- * (which a bare localStorage.clear() did) makes both features look broken.
+ * Theme is a device preference, and the remembered sign-in id is the
+ * "remember me" box the user ticked on purpose; wiping that on sign-out makes
+ * the feature look broken.
  */
-const PRESERVED_KEYS = ['appTheme', 'visioSphere_savedId', 'visioSphere_savedPass'];
+const PRESERVED_KEYS = ['appTheme', 'visioSphere_savedId'];
 
 /**
  * End the session: drop the token and everything identifying the signed-in

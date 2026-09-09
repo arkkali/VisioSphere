@@ -139,11 +139,14 @@ const Login = () => {
 
     const savedId = localStorage.getItem('visioSphere_savedId');
     const savedPass = localStorage.getItem('visioSphere_savedPass');
-    
-    if (savedId && savedPass) {
+
+    if (savedId) {
       setLoginId(savedId);
-      setLoginPassword(savedPass);
       setRememberMe(true);
+    }
+
+    if (savedPass) {
+      localStorage.removeItem('visioSphere_savedPass');
     }
 
     return () => {
@@ -237,7 +240,7 @@ const Login = () => {
 
         if (rememberMe) {
           localStorage.setItem('visioSphere_savedId', loginId);
-          localStorage.setItem('visioSphere_savedPass', loginPassword);
+          localStorage.removeItem('visioSphere_savedPass');
         } else {
           localStorage.removeItem('visioSphere_savedId');
           localStorage.removeItem('visioSphere_savedPass');
@@ -370,7 +373,7 @@ const Login = () => {
       if (response.ok) {
         if (rememberMe) {
           localStorage.setItem('visioSphere_savedId', loginId);
-          localStorage.setItem('visioSphere_savedPass', loginPassword);
+          localStorage.removeItem('visioSphere_savedPass');
         }
 
         localStorage.setItem('token', data.token);

@@ -1,4 +1,5 @@
 import React from 'react';
+import DOMPurify from 'dompurify';
 import { Box, Typography, Checkbox, Button } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -36,6 +37,8 @@ const ChartPreview = ({ content, isDark }) => {
 };
 
 const BlockReadonly = ({ block, isDark }) => {
+  const sanitizedHtml = React.useMemo(() => DOMPurify.sanitize(block.content || ''), [block.content]);
+
   switch (block.type) {
     case 'text':
       return (
@@ -50,7 +53,7 @@ const BlockReadonly = ({ block, isDark }) => {
             '& p': { margin: 0, padding: 0 },
             '& img': { maxWidth: '100%', height: 'auto', borderRadius: '8px' },
           }}
-          dangerouslySetInnerHTML={{ __html: block.content }}
+          dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
         />
       );
 
