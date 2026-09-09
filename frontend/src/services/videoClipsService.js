@@ -277,6 +277,58 @@ export async function deleteClip(incidentId, { signal } = {}) {
   return data;
 }
 
+/**
+ * Signed URL that saves one clip to disk. Facility Admin only -- the backend
+ * returns 403 for anyone else, and the token it mints is download-scoped, so a
+ * playback URL cannot be edited into a download.
+ *
+ * Returns null on 404, matching getClipVideoUrl: an incident whose clip has not
+ * been encoded yet is a normal state, not a failure.
+ */
+export async function getClipDownloadUrl(incidentId) {
+  try {
+    const { data } = await axiosInstance.get(
+      `${API_PREFIX}/incidents/${incidentId}/download-url`
+    );
+    return data;
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Fetch a download URL and hand it to the browser.
+ *
+ * Must be called from inside a click handler. The anchor click inherits that
+ * user activation, which is what stops Chrome from blocking a cross-origin
+ * download -- the bytes come from the mini PC's tunnel origin, not from the
+ * dashboard's.
+ *
+ * The `download` attribute is set but has no effect here: browsers ignore it
+ * for cross-origin responses. The saved filename comes from ai_core's
+ * Content-Disposition header. It is kept for the same-origin dev case, where
+ * the clip server runs on the same host as the frontend.
+ *
+ * @returns {Promise<object|null>} null when there is no clip to download yet.
+ */
+export async function downloadClip(incidentId) {
+  const result = await getClipDownloadUrl(incidentId);
+  if (!result?.url) return null;
+
+  const anchor = document.createElement('a');
+  anchor.href = result.url;
+  anchor.download = result.filename || '';
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  return result;
+}
+
 /** True if the signed-in user may delete recordings. The backend enforces this
  *  independently; this only decides whether to render the control. */
 export function canDeleteClips() {
@@ -299,6 +351,22 @@ export function canDeleteClips() {
   } catch (_) {
     return false;
   }
+}
+
+/**
+ * True if the signed-in user may download recordings.
+ *
+ * Same signals as canDeleteClips -- both are Facility Admin only today, and the
+ * backend enforces each independently. Kept as its own function so the two
+ * policies can diverge later without hunting down call sites.
+ *
+ * Worth being clear about what this control is and is not. It decides whether
+ * to render an audited export button. It does NOT keep footage away from a
+ * viewer: anyone who can PLAY a clip already receives the bytes and can save
+ * them from the browser. Restricting that would mean restricting playback.
+ */
+export function canDownloadClips() {
+  return canDeleteClips();
 }
 
 // ---------------------------------------------------------------------------
@@ -332,10 +400,13 @@ export default {
   eventTypes,
   fetchVideoClips,
   getClipVideoUrl,
+  getClipDownloadUrl,
+  downloadClip,
   fetchThumbnailUrls,
   updateClip,
   deleteClip,
   canDeleteClips,
+  canDownloadClips,
   getCameraGroups,
   categoryForType,
   INCIDENT_TYPES,

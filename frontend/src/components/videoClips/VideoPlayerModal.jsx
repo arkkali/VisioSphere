@@ -13,7 +13,7 @@
 // https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes
 
 import React, { useRef, useEffect, useState } from 'react';
-import { getClipVideoUrl } from '../../services/videoClipsService';
+import { getClipVideoUrl, downloadClip } from '../../services/videoClipsService';
 
 function formatDuration(seconds) {
   if (!Number.isFinite(seconds)) return null;
@@ -28,7 +28,7 @@ function formatDuration(seconds) {
  * key={clip.id} every time the selected clip changes, so no effect needs to
  * reset anything before it starts fetching.
  */
-const ClipPlayer = ({ clip, onClose }) => {
+const ClipPlayer = ({ clip, onClose, canDownload }) => {
   const videoRef = useRef(null);
 
   // Starts true, not reset to true inside an effect: a fresh mount of this
@@ -40,6 +40,29 @@ const ClipPlayer = ({ clip, onClose }) => {
   const [duration, setDuration] = useState(null);
   // null = playing fine. Otherwise { reason, code, detail } from handleError.
   const [playbackFailure, setPlaybackFailure] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+
+  // Runs directly from the button's click handler. The anchor created inside
+  // downloadClip() needs this click's user activation to be allowed to start a
+  // cross-origin download, so this must not be deferred into an effect.
+  const handleDownload = async () => {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const result = await downloadClip(clip.id);
+      if (!result) setDownloadError('This clip is not available to download yet.');
+    } catch (err) {
+      console.error('[VideoPlayerModal] download failed:', err);
+      setDownloadError(
+        err?.response?.status === 403
+          ? 'Only a Facility Admin may download recordings.'
+          : 'Could not start the download. Please try again.'
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -163,17 +186,43 @@ const ClipPlayer = ({ clip, onClose }) => {
             {clip.dateLabel} · {clip.timeLabel} · {clip.cameraName}
             {duration ? ` · ${duration}` : ''}
           </p>
+          {downloadError && (
+            <p className="m-0 mt-1 text-[0.68rem] font-semibold text-[#e11d48] dark:text-[#ff6b81]">
+              {downloadError}
+            </p>
+          )}
         </div>
-        <button
-          onClick={onClose}
-          className="w-[30px] h-[30px] flex items-center justify-center rounded-full text-[#5a6265] dark:text-[#a6aeb2] hover:bg-[#f1f5f9] dark:hover:bg-[#00435c] transition-colors"
-          aria-label="Close video player"
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Only offered once the clip has actually resolved: a download of a
+              clip that is still encoding would just 404, and the player
+              already says so in that state. Admin-only, enforced server-side
+              on GET /incidents/:id/download-url. */}
+          {canDownload && resolvedUrl && (
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="flex items-center gap-1.5 h-[30px] px-[11px] rounded-full text-[0.72rem] font-bold text-[#00212e] dark:text-white bg-[#f1f5f9] dark:bg-[#00435c] hover:bg-[#e2e8f0] dark:hover:bg-[#005a7a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Download this clip"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              {downloading ? 'Preparing\u2026' : 'Download'}
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="w-[30px] h-[30px] flex items-center justify-center rounded-full text-[#5a6265] dark:text-[#a6aeb2] hover:bg-[#f1f5f9] dark:hover:bg-[#00435c] transition-colors"
+            aria-label="Close video player"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className="bg-black aspect-video flex items-center justify-center">
@@ -212,7 +261,7 @@ const ClipPlayer = ({ clip, onClose }) => {
   );
 };
 
-const VideoPlayerModal = ({ clip, onClose }) => {
+const VideoPlayerModal = ({ clip, onClose, canDownload = false }) => {
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === 'Escape') onClose();
@@ -228,7 +277,7 @@ const VideoPlayerModal = ({ clip, onClose }) => {
       className="fixed inset-0 z-[2000] bg-black/70 flex items-center justify-center p-4"
       onClick={onClose}
     >
-      <ClipPlayer key={clip.id} clip={clip} onClose={onClose} />
+      <ClipPlayer key={clip.id} clip={clip} onClose={onClose} canDownload={canDownload} />
     </div>
   );
 };

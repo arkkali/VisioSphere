@@ -16,6 +16,7 @@ const VideoClipsGrid = ({
   onEditClip,
   onDeleteClip,
   canDelete,
+  canDownload,
   selectionMode,
   selectedIds,
   onToggleSelect,
@@ -41,6 +42,7 @@ const VideoClipsGrid = ({
             onEdit={onEditClip}
             onDelete={onDeleteClip}
             canDelete={canDelete}
+            canDownload={canDownload}
             selectionMode={selectionMode}
             selected={selectedIds?.has(clip.id) || false}
             onToggleSelect={onToggleSelect}

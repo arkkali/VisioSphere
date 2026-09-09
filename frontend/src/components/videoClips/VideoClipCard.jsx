@@ -12,6 +12,7 @@
 // gradient rather than showing a broken-image icon.
 
 import React, { useState, useRef, useEffect } from 'react';
+import { downloadClip } from '../../services/videoClipsService';
 
 const BADGE_STYLES = {
   Fall:         { bg: 'bg-[#ef4444]', label: 'FALL DETECTED' },
@@ -26,12 +27,18 @@ const VideoClipCard = ({
   onEdit,
   onDelete,
   canDelete,
+  canDownload,
   selectionMode,
   selected,
   onToggleSelect,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [thumbFailed, setThumbFailed] = useState(false);
+  // 'idle' | 'working' | 'unavailable' | 'error'. Local to the card because a
+  // download is per-clip and does not change any shared state -- lifting it to
+  // the page would only add prop drilling for a control that resolves in a
+  // second or two.
+  const [downloadState, setDownloadState] = useState('idle');
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -55,6 +62,27 @@ const VideoClipCard = ({
   const handleThumbClick = () => {
     if (selectionMode) onToggleSelect(clip.id);
     else onSelect(clip);
+  };
+
+  // Called straight from the click handler, not via an effect: the browser
+  // only allows a cross-origin download while the user activation from this
+  // click is still live.
+  const handleDownload = async () => {
+    setDownloadState('working');
+    try {
+      const result = await downloadClip(clip.id);
+      if (result) {
+        setDownloadState('idle');
+        setMenuOpen(false);
+      } else {
+        // The incident exists but ai_core has not finished encoding its clip.
+        // Normal, not an error -- say so and leave the menu open.
+        setDownloadState('unavailable');
+      }
+    } catch (err) {
+      console.error('[VideoClipCard] download failed:', err);
+      setDownloadState('error');
+    }
   };
 
   return (
@@ -179,6 +207,28 @@ const VideoClipCard = ({
                 >
                   Edit Details
                 </button>
+                {/* Exporting footage is admin-only, same as deleting, and is
+                    written to the audit trail server-side. */}
+                {canDownload && (
+                  <button
+                    onClick={handleDownload}
+                    disabled={downloadState === 'working'}
+                    className="w-full text-left px-3 py-[7px] text-[0.75rem] font-semibold text-[#00212e] dark:text-white hover:bg-[#f9fdfe] dark:hover:bg-[#00212e] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {downloadState === 'working' ? 'Preparing\u2026' : 'Download Clip'}
+                  </button>
+                )}
+                {downloadState === 'unavailable' && (
+                  <p className="m-0 px-3 py-[5px] text-[0.66rem] font-semibold text-[#9dabb1] dark:text-[#8fb0bc]">
+                    Not available yet.
+                  </p>
+                )}
+                {downloadState === 'error' && (
+                  <p className="m-0 px-3 py-[5px] text-[0.66rem] font-semibold text-[#e11d48] dark:text-[#ff6b81]">
+                    Download failed.
+                  </p>
+                )}
+
                 {/* Deleting footage is admin-only. The backend enforces this
                     independently on DELETE /incidents/:id/clip; hiding the
                     entry only avoids offering an action that returns 403. */}

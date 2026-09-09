@@ -13,7 +13,7 @@ import EditClipModal from '../components/videoClips/EditClipModal';
 import DeleteClipDialog from '../components/videoClips/DeleteClipDialog';
 
 import { useVideoClips } from '../hooks/useVideoClips';
-import { canDeleteClips } from '../services/videoClipsService';
+import { canDeleteClips, canDownloadClips } from '../services/videoClipsService';
 
 const VideoClips = () => {
   const location = useLocation();
@@ -30,6 +30,10 @@ const VideoClips = () => {
   // DELETE /incidents/:id/clip; this only decides whether to offer the
   // control, so a tampered localStorage buys nothing but a 403.
   const canDelete = useMemo(() => canDeleteClips(), []);
+  // Same story for downloads: the backend enforces Facility Admin on
+  // GET /incidents/:id/download-url and audits every issued link, so this only
+  // decides whether the control is offered.
+  const canDownload = useMemo(() => canDownloadClips(), []);
 
   const {
     loading,
@@ -188,6 +192,7 @@ const VideoClips = () => {
                     onEditClip={setEditingClip}
                     onDeleteClip={setPendingDelete}
                     canDelete={canDelete}
+                    canDownload={canDownload}
                     selectionMode={selectionMode}
                     selectedIds={selectedIds}
                     onToggleSelect={toggleSelected}
@@ -199,7 +204,11 @@ const VideoClips = () => {
         </div>
       </main>
 
-      <VideoPlayerModal clip={selectedClip} onClose={() => setSelectedClip(null)} />
+      <VideoPlayerModal
+        clip={selectedClip}
+        onClose={() => setSelectedClip(null)}
+        canDownload={canDownload}
+      />
       {/* Mounted ONLY while there is something to act on.
           These used to render unconditionally and return null internally, so
           the component instance — and its state — survived between openings.
