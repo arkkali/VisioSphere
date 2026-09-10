@@ -209,10 +209,12 @@ export const sessionLooksContinuous = () => heartbeatAge() <= ALIVE_GRACE_MS;
 export const startBrowserSessionGuard = async () => {
   answerPings();
 
-  if (heartbeatAge() > ALIVE_GRACE_MS && !(await anotherTabIsAlive())) {
-    clearSession();
-  }
-
+  // Do not clear the session on a cold page load. The backend is the
+  // authority on whether the JWT is still valid, and the browser-side
+  // auto-clear was the reason the web app would silently force a fresh
+  // sign-in after a long idle period even though the mobile app stayed live.
+  // Regular logout and 401 handling remain the only places that should drop
+  // the stored token.
   beat();
   window.setInterval(beat, HEARTBEAT_MS);
 
