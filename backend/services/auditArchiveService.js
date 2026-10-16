@@ -33,9 +33,20 @@ const currentFacilityKey = () => {
   }
 };
 
+// TIMEZONE: the 'en-PH' locale chooses the FORMAT (day/month order, AM/PM).
+// It does NOT choose the zone. Without an explicit `timeZone` this falls back
+// to the host clock, and the host is Render, which runs UTC — so every
+// timestamp in the archived audit trail read eight hours early while looking
+// Philippine-formatted, which is the hardest kind of wrong to notice. The zone
+// is pinned here rather than left to the environment because this workbook is
+// a compliance record read by facility staff in Manila, and it must not change
+// meaning because a deploy landed on a differently-configured host.
+const ARCHIVE_TZ = 'Asia/Manila';
+
 const formatDate = (date) => {
   if (!date) return '';
   return new Date(date).toLocaleString('en-PH', {
+    timeZone: ARCHIVE_TZ,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -47,7 +58,10 @@ const formatDate = (date) => {
 };
 
 const buildFilename = (cutoff, facility) => {
-  const tag = cutoff.toISOString().slice(0, 10);
+  // 'en-CA' formats as YYYY-MM-DD. toISOString() would give the UTC date, and
+  // the archive cron fires at 02:00 Manila — 18:00 UTC the previous day — so
+  // the file was named a day earlier than the cutoff it actually represents.
+  const tag = cutoff.toLocaleDateString('en-CA', { timeZone: ARCHIVE_TZ });
   return `audit_archive_${facility}_${tag}.xlsx`;
 };
 
