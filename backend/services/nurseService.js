@@ -2,6 +2,10 @@ const bcrypt = require('bcryptjs');
 const Nurse = require('../models/Nurse');
 const Admin = require('../models/Admin');
 const AuditLog = require('../models/AuditLog');
+const {
+  assertEmailAvailable,
+  isDuplicateEmailError,
+} = require('./accountEmailService');
 
 const throwError = (message, status) => {
   const err = new Error(message);
@@ -62,12 +66,21 @@ exports.getLinkedProfile = async (adminId) => {
 
 exports.create = async (data) => {
   const { firstName, middleName, lastName, email, houseAssigned } = data;
+  const normalizedEmail = await assertEmailAvailable(email);
   const nurseId = await Nurse.generateNurseId();
-  const nurse = await new Nurse({
-    nurseId, firstName, middleName: middleName || '',
-    lastName, email, houseAssigned,
-    status: 'Active', isFirstLogin: true, password: null, assignedElders: []
-  }).save();
+  let nurse;
+  try {
+    nurse = await new Nurse({
+      nurseId, firstName, middleName: middleName || '',
+      lastName, email: normalizedEmail, houseAssigned,
+      status: 'Active', isFirstLogin: true, password: null, assignedElders: []
+    }).save();
+  } catch (error) {
+    if (isDuplicateEmailError(error)) {
+      throwError('That email address is already used by another account.', 409);
+    }
+    throw error;
+  }
 
   await AuditLog.create({
     category: 'Registration', event: 'New Nurse Added',
@@ -89,8 +102,21 @@ exports.update = async (nurseId, data) => {
   const old = await Nurse.findOne({ nurseId });
   if (!old) throwError('Nurse not found', 404);
 
-  const updated = await Nurse.findOneAndUpdate({ nurseId }, data, { returnDocument: 'after' })
-    .select('-password').populate('assignedElders');
+  const updateData = { ...data };
+  if (updateData.email !== undefined) {
+    updateData.email = await assertEmailAvailable(updateData.email, { exceptNurseId: nurseId });
+  }
+
+  let updated;
+  try {
+    updated = await Nurse.findOneAndUpdate({ nurseId }, updateData, { returnDocument: 'after' })
+      .select('-password').populate('assignedElders');
+  } catch (error) {
+    if (isDuplicateEmailError(error)) {
+      throwError('That email address is already used by another account.', 409);
+    }
+    throw error;
+  }
 
   await AuditLog.create({
     category: 'Account Management', event: 'Nurse Profile Updated',
@@ -101,7 +127,7 @@ exports.update = async (nurseId, data) => {
       houseAssigned: old.houseAssigned,
       status: old.status
     },
-    newValues: data
+    newValues: updateData
   });
 
   return updated;

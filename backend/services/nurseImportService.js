@@ -1,6 +1,10 @@
 const fs = require('fs');
 const XLSX = require('xlsx');
 const Nurse = require('../models/Nurse');
+const {
+  assertEmailAvailable,
+  isDuplicateEmailError,
+} = require('./accountEmailService');
 
 const FIELD_MAP = {
   firstName:     ['First Name',     'firstName',     'FIRST NAME'],
@@ -38,11 +42,20 @@ const createNurseFromRow = async (row) => {
   if (!firstName || !lastName || !email || !houseAssigned)
     throw new Error('Missing required fields');
 
+  const normalizedEmail = await assertEmailAvailable(email);
   const nurseId = await Nurse.generateNurseId();
-  return new Nurse({
-    nurseId, firstName, middleName, lastName, email, houseAssigned,
-    status: 'Active', isFirstLogin: true, password: null, assignedElders: []
-  }).save();
+  try {
+    return await new Nurse({
+      nurseId, firstName, middleName, lastName,
+      email: normalizedEmail, houseAssigned,
+      status: 'Active', isFirstLogin: true, password: null, assignedElders: []
+    }).save();
+  } catch (error) {
+    if (isDuplicateEmailError(error)) {
+      throw new Error('That email address is already used by another account.');
+    }
+    throw error;
+  }
 };
 
 exports.importFromFile = async (filePath, mimetype) => {
